@@ -1,0 +1,19 @@
+{
+    "name": "rsml-luau",
+    "tree": {
+        "$className": "DataModel",
+
+        "ServerScriptService": {
+            
+            "Packages": {
+                "$className": "Folder",
+
+                "Rsml": {
+                    "$path": "src"
+                }
+            },
+
+            "$path": "test"
+        }
+    }
+}
