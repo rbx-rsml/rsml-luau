@@ -6,8 +6,8 @@ local Parser = require(script.Parent.Parser)
 type StyleParent = StyleSheet | StyleRule
 
 local function GetRoot()
-    local idx = 3
-    local root = debug.info(3, "s")
+    local idx = 1
+    local root = debug.info(idx, "s")
 
     while true do
         idx += 1
@@ -18,18 +18,38 @@ local function GetRoot()
             return root
         end
     end
+
+    return root
 end
 
 local function InstanceFromString(instString: string): Instance
-    local rootParentFullName = debug.info(3, "s")
-    
-    local rootParent = game
+    local inst = game
 
-    for _,segment in string.split(rootParentFullName, ".") do
-        rootParent = (rootParent :: any)[segment]
+    local segments = string.split(instString, ".")
+    local segmentsLength = #segments
+
+    local idx = 0
+    while idx < segmentsLength do
+        idx += 1
+        local segment = segments[idx]
+
+        repeat
+            local ok, updatedInst = pcall(function()
+                return (inst :: any)[segment]
+            end)
+
+            if not ok then
+                idx += 1
+                segment = `{segment}.{segments[idx]}`
+
+            else
+                inst = updatedInst
+                continue
+            end
+        until updatedInst or idx == segmentsLength
     end
 
-    return rootParent
+    return inst
 end
 
 local function ApplyDerive(styleSheet: StyleSheet, parent: StyleSheet)

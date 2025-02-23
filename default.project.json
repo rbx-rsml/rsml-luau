@@ -1,10 +1,6 @@
 {
     "name": "rsml-luau",
     "tree": {
-        "$className": "DataModel",
-
-        "ServerScriptService": {
-            "$path": "src"
-        }
+        "$path": "src"
     }
 }

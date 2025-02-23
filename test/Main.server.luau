@@ -7,8 +7,6 @@ local AttributeStyles = Rsml [[!rsml
     $TextSize = 14;
     $ColorText = tw:slate:50;
     $ColorPrimary = tw:blue:700;
-    $ColorSecondary = tw:slate:700;
-    $ColorDestructive = tw:rose:700;
 ]]
 
 local ButtonStyles = Rsml([[!rsml
@@ -25,20 +23,6 @@ local ButtonStyles = Rsml([[!rsml
         .Primary {
             BackgroundColor3 = $ColorPrimary;
         }
-
-        .Secondary {
-            BackgroundColor3 = $ColorSecondary;
-        }
-
-        .Destructive {
-            BackgroundColor3 = $ColorDestructive;
-        }
-
-        .Disabled {
-            BackgroundTransparency = .4;
-            Interactable = false;
-        }
-
         ::UIPadding {
             PaddingLeft = 10px;
             PaddingRight = 10px;
@@ -52,6 +36,8 @@ local ButtonStyles = Rsml([[!rsml
         }
     }
 ]], { AttributeStyles })
+
+
 
 local function CreateButton(
     variant: ("Primary" | "Secondary" | "Destructive")?,

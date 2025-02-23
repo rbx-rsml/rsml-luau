@@ -4,13 +4,8 @@
         "$className": "DataModel",
 
         "ServerScriptService": {
-            
-            "Packages": {
-                "$className": "Folder",
-
-                "Rsml": {
-                    "$path": "src"
-                }
+           "Packages": {
+                "$path": "packages.project.json"
             },
 
             "$path": "test"

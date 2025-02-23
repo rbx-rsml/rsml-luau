@@ -8,7 +8,7 @@ type Token = Lexer.Token
 
 local Colors = script.Parent.Colors
 local ColorsCss = require(Colors.Css)
-local ColorsTailwind = require(Colors.Tailwaind)
+local ColorsTailwind = require(Colors.Tailwind)
 local ColorsBrick = require(Colors.Brick)
 
 local Parser = {}
@@ -98,7 +98,7 @@ local OperatorSymbols: { [string]: OperatorSymbol } = {
     ["OpSub"] = OperatorSubSymbol
 }
 
-export type Datatype = string | boolean | Enum | Color3 | number | UDim | UDim2 | OperatorSymbol | Vector3 | Rect | Font
+export type Datatype = string | boolean | Enum | Color3 | number | UDim | UDim2 | OperatorSymbol | Vector3 | Rect | Font | Vector2
 
 export type AttributesAndProperties = { [string]: Datatype }
 export type Rules = { TreeNode }
@@ -374,8 +374,8 @@ local function ParseColorTailwindDatatype(parser: Parser, currTreeNode: TreeNode
 
     parser:Advance()
 
-    local color: string? = ColorsTailwind[token.Value]
-    return if color then Color3.fromHex(color) else nil
+    local color = ColorsTailwind[token.Value]
+    return if color then color else nil
 end
 
 local function ParseColorCssDatatype(parser: Parser, currTreeNode: TreeNode, token: Token): Color3?
@@ -383,8 +383,8 @@ local function ParseColorCssDatatype(parser: Parser, currTreeNode: TreeNode, tok
 
     parser:Advance()
 
-    local color: string? = ColorsCss[token.Value]
-    return if color then Color3.fromHex(color) else nil
+    local color = ColorsCss[token.Value]
+    return if color then color else nil
 end
 
 
@@ -393,8 +393,8 @@ local function ParseColorBrickDatatype(parser: Parser, currTreeNode: TreeNode, t
 
     parser:Advance()
 
-    local color: { number }? = ColorsBrick[token.Value]
-    return if color then Color3.fromRGB(color[1], color[2], color[3]) else nil
+    local color = ColorsBrick[token.Value]
+    return if color then color else nil
 end
 
 local function ParseBoolean(parser: Parser, currTreeNode: TreeNode, token: Token): boolean?
@@ -809,6 +809,30 @@ local DatatypeOperations: Operations = {
                 operationFn(left, right.Y),
                 operationFn(left, right.Z)
             )
+        end,
+
+        ["Vector2"] = function(left: number, right: Vector2, operationFn): Vector2
+            return Vector2.new(
+                operationFn(left, right.X), 
+                operationFn(left, right.Y)
+            )
+        end,
+
+        ["Rect"] = function(left: number, right: Rect, operationFn): Rect
+            local rightMin, rightMax = right.Min, right.Max
+
+            return Rect.new(
+                operationFn(left, rightMin.X), operationFn(left, rightMin.Y),
+                operationFn(left, rightMax.X), operationFn(left, rightMax.Y)
+            )
+        end,
+
+        ["Color3"] = function(left: number, right: Color3, operationFn): Color3
+            return Color3.new(
+                operationFn(left, right.R),
+                operationFn(left, right.G),
+                operationFn(left, right.B)
+            )
         end
     },
 
@@ -858,7 +882,62 @@ local DatatypeOperations: Operations = {
                 operationFn(left.Z, right.Z)
             )
         end,
-    }
+    },
+
+    ["Vector2"] = {
+        ["number"] = function(left: Vector2, right: number, operationFn): Vector2
+            return Vector2.new(
+                operationFn(left.X, right), 
+                operationFn(left.Y, right)
+            )
+        end,
+
+        ["Vector2"] = function(left: Vector2, right: Vector2, operationFn): Vector2
+            return Vector2.new(
+                operationFn(left.X, right.X), 
+                operationFn(left.Y, right.Y)
+            )
+        end,
+    },
+
+    ["Rect"] = {
+        ["number"] = function(left: Rect, right: number, operationFn): Rect
+            local leftMin, leftMax = left.Min, left.Max
+
+            return Rect.new(
+                operationFn(leftMin.X, right), operationFn(leftMin.Y, right),
+                operationFn(leftMax.X, right), operationFn(leftMax.Y, right)
+            )
+        end,
+
+        ["Rect"] = function(left: Rect, right: Rect, operationFn): Rect
+            local leftMin, leftMax = right.Min, right.Max
+            local rightMin, rightMax = right.Min, right.Max
+
+            return Rect.new(
+                operationFn(leftMin.X, rightMin.X), operationFn(leftMin.Y, rightMin.Y),
+                operationFn(leftMax.X, rightMax.X), operationFn(leftMax.Y, rightMax.Y)
+            )
+        end
+    },
+
+    ["Color3"] = {
+        ["number"] = function(left: Color3, right: number, operationFn): Color3
+            return Color3.new(
+                operationFn(left.R, right),
+                operationFn(left.G, right),
+                operationFn(left.B, right)
+            )
+        end,
+
+        ["Color3"] = function(left: Color3, right: Color3, operationFn): Color3
+            return Color3.new(
+                operationFn(left.R, right.R),
+                operationFn(left.G, right.G),
+                operationFn(left.B, right.B)
+            )
+        end
+    },
 }
 
 local function SolveDatatypeGroup(datatypes: { Datatype }): Datatype
