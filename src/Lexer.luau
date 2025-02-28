@@ -185,6 +185,10 @@ local TokenDefinitions: { TokenDefinition } = {
         Pattern = "tw:[a-z]+:%d+"
     },
     {
+        Kind = "ColorTailwind",
+        Pattern = "tw:[a-z]+"
+    },
+    {
         Kind = "ColorBrick",
         Pattern = "bc:[a-z]+"
     },

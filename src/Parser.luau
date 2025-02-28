@@ -98,9 +98,9 @@ local OperatorSymbols: { [string]: OperatorSymbol } = {
     ["OpSub"] = OperatorSubSymbol
 }
 
-export type Datatype = string | boolean | Enum | Color3 | number | UDim | UDim2 | OperatorSymbol | Vector3 | Rect | Font | Vector2
+export type Datatype = string | boolean | Enum | Color3 | number | UDim | UDim2 | OperatorSymbol | Vector3 | Rect | Font | Vector2 | ColorSequenceKeypoint
 
-export type AttributesAndProperties = { [string]: Datatype }
+export type AttributesAndProperties = { [string]: Datatype | TupleData }
 export type Rules = { TreeNode }
 
 export type TreeNode = {
@@ -374,8 +374,7 @@ local function ParseColorTailwindDatatype(parser: Parser, currTreeNode: TreeNode
 
     parser:Advance()
 
-    local color = ColorsTailwind[token.Value]
-    return if color then color else nil
+    return ColorsTailwind[token.Value]
 end
 
 local function ParseColorCssDatatype(parser: Parser, currTreeNode: TreeNode, token: Token): Color3?
@@ -383,8 +382,7 @@ local function ParseColorCssDatatype(parser: Parser, currTreeNode: TreeNode, tok
 
     parser:Advance()
 
-    local color = ColorsCss[token.Value]
-    return if color then color else nil
+    return ColorsCss[token.Value]
 end
 
 
@@ -393,8 +391,7 @@ local function ParseColorBrickDatatype(parser: Parser, currTreeNode: TreeNode, t
 
     parser:Advance()
 
-    local color = ColorsBrick[token.Value]
-    return if color then color else nil
+    return ColorsBrick[token.Value]
 end
 
 local function ParseBoolean(parser: Parser, currTreeNode: TreeNode, token: Token): boolean?
@@ -414,10 +411,12 @@ local function ParseAttributeName(parser: Parser, currTreeNode: TreeNode, token:
     return ParseText(parser, currTreeNode, token)
 end
 
+type TupleData = { Datatype | { TupleData } }
+
 type Tuple = {
     Name: string?,
     Parent: Tuple?,
-    Data: { Datatype },
+    Data: TupleData,
 }
 
 local function NewTuple(name: string?, parent: Tuple?)
@@ -432,11 +431,57 @@ local function DefaultIfNotType<T>(target: T, expectedType: string, default: T):
     return if type(target) ~= expectedType then default else target
 end
 
+local function DefaultIfNotTypeOf<T>(target: T, expectedType: string, default: T): T
+    return if typeof(target) ~= expectedType then default else target
+end
+
 local function CoerceToUDim<T>(target: T, default: UDim): UDim
     local targetTypeof = typeof(target)
     if targetTypeof == "number" then return UDim.new((target :: any) :: number, 0) end
     if targetTypeof == "UDim" then return (target :: any) :: UDim end
     return default
+end
+
+local function ColorSeqGetColorAndTime(item: Datatype): (Color3, number?)
+    local color, colorTime
+
+    local typeofItem = typeof(item)
+
+    if typeofItem == "table" then
+        colorTime = DefaultIfNotType((item :: any)[1], "number", nil)
+        color = DefaultIfNotTypeOf((item :: any)[2], "Color3", Color3.new())
+
+    elseif typeofItem == "Color3" then
+        color = item
+    end
+
+    return color, if colorTime then math.clamp(colorTime, 0, 1) else nil
+end
+
+local function ColorSeqGetStartValue(
+    currIdx: number, colors: { ColorSequenceKeypoint | Color3 }
+): (number, number)
+    for idx = currIdx - 1, 1, -1 do
+        local color = colors[idx]
+        if typeof(color) ~= "ColorSequenceKeypoint" then continue end
+
+        return idx, color.Time :: number
+    end
+
+    return 1, 0
+end
+
+local function ColorSeqGetEndValue(
+    currIdx: number, colors: { ColorSequenceKeypoint | Color3 }, colorsLength: number
+): (number, number)
+    for idx = currIdx + 1, colorsLength do
+        local color = colors[idx]
+        if typeof(color) ~= "ColorSequenceKeypoint" then continue end
+        
+        return idx, color.Time :: number
+    end
+
+    return colorsLength, 1
 end
 
 type TupleAnnotationFunction<T = Datatype> = (data: { Datatype }) -> T
@@ -449,6 +494,7 @@ type TupleAnnotationFunctions = {
     rect: TupleAnnotationFunction<Rect>,
     color3: TupleAnnotationFunction<Color3>,
     rgb: TupleAnnotationFunction<Color3>,
+    colorseq: TupleAnnotationFunction<ColorSequence>,
     font: TupleAnnotationFunction<Font>,
 }
 
@@ -516,6 +562,65 @@ local TupleAnnotations: TupleAnnotationFunctions = {
         return Color3.fromRGB(red, green, blue)
     end,
 
+    colorseq = function(data)
+        -- If the data only contains one color then we only
+        -- need to return a color sequence with that color.
+        if #data == 1 then
+            local color = ColorSeqGetColorAndTime(data[1])
+            return ColorSequence.new(color)
+        end
+
+        local timedColors: { ColorSequenceKeypoint }, untimedColors: { Color3 } = {}, {}
+
+        -- Separates the colors based on if their time is explicitly stated.
+        for idx, item in data do
+            local color, colorTime = ColorSeqGetColorAndTime(item)
+
+            if colorTime then
+                table.insert(timedColors, ColorSequenceKeypoint.new(colorTime, color))
+
+            else
+                untimedColors[idx] = color
+            end
+        end
+
+        table.sort(timedColors, function(a, b) return a.Time < b.Time end)
+
+        local colors = timedColors :: { ColorSequenceKeypoint | Color3 }
+
+        -- We need to insert the colors now to ensure color 
+        -- times are calculated properly in the next step.
+        for idx, color in untimedColors do
+            table.insert(colors, idx, color)
+        end
+
+        local colorsLength = #colors
+        for idx, color in untimedColors do
+            local startIdx, startValue = ColorSeqGetStartValue(idx, colors)
+            local endIdx, endValue = ColorSeqGetEndValue(idx, colors, colorsLength)
+
+            local colorTime = math.lerp(startValue, endValue, (idx - startIdx) / (endIdx - startIdx))
+
+            colors[idx] = ColorSequenceKeypoint.new(colorTime, color)
+        end
+
+        local colors = timedColors :: { ColorSequenceKeypoint }
+
+        -- Ensures that the first keypoint's time is 0.
+        local firstColorKeypoint = colors[1]
+        if firstColorKeypoint.Time ~= 0 then
+            table.insert(colors, ColorSequenceKeypoint.new(0, firstColorKeypoint.Value))
+        end
+        
+        -- Ensures that the last keypoint's time is 1.
+        local lastColorKeypoint = colors[colorsLength]
+        if lastColorKeypoint.Time ~= 1 then
+            table.insert(colors, ColorSequenceKeypoint.new(1, lastColorKeypoint.Value))
+        end
+
+        return ColorSequence.new(colors :: { ColorSequenceKeypoint })
+    end,
+
     font = function(data)
         local fontFamily = data[1]
         local fontFamilyType = type(fontFamily)
@@ -554,103 +659,105 @@ local TupleAnnotations: TupleAnnotationFunctions = {
     end,
 }
 
-local function CoerceTupleToDatatype(tuple: Tuple): Datatype?
-    local tupleName = tuple.Name
+local function CoerceTupleToDatatype(tuple: Tuple): (Datatype | TupleData)?
+    local tupleName, tupleData = tuple.Name, tuple.Data
 
     if tupleName then
         local annotationFunction = TupleAnnotations[string.lower(tupleName)]
-        if annotationFunction then return annotationFunction(tuple.Data) end
+        if annotationFunction then return annotationFunction(tupleData) end
     end
 
-    -- If the tuple's datatypes could not be coerced into
-    -- one datatype then the first datatype is returned.
-    return tuple.Data[1]
+    local tupleDataLength = #tupleData
+
+    return
+        -- If the tuple has no items then there is no datatype.
+        if tupleDataLength == 0 then nil
+        -- If the tuple only has one item then it can be simplified to just that item.
+        elseif tupleDataLength == 1 then tupleData[1] 
+        else tupleData
 end
 
 local function ParseTupleClose(
     parser: Parser, currTreeNode: TreeNode, token: Token, 
-    rootTuple: Tuple, tuple: Tuple
-): Tuple?
-    if token.Kind ~= "ParensClose" then return end
+    currTuple: Tuple, rootTuple: Tuple
+): boolean
+    if token.Kind ~= "ParensClose" then return false end
 
-    local parentTuple = tuple.Parent
-
-    if parentTuple then
-        local datatype = CoerceTupleToDatatype(tuple)
-        if datatype then table.insert(parentTuple.Data, datatype) end
-    end
-
-    -- We are at the root of the tuple, no need to parse more tuple tokens.
-    if rootTuple == tuple then return rootTuple end
+    local parentTuple = currTuple.Parent
 
     local token = parser:Advance()
-    if not token then return parentTuple end
 
     if parentTuple then
-        local parsed = ParseTupleDelimiter(parser, currTreeNode, token, rootTuple, parentTuple)
-        if parsed then return parsed end
+        local datatype = CoerceTupleToDatatype(currTuple)
+        if datatype then table.insert(parentTuple.Data, datatype) end
 
-        local parsed = ParseTupleClose(parser, currTreeNode, token, rootTuple, parentTuple)
-        if parsed then return parsed end
+        if not token then return true end
 
-        local parsed = ParseTupleDatatype(parser, currTreeNode, token, rootTuple, parentTuple)
-        if parsed then return parsed end
+        local parsed = ParseTupleDelimiter(parser, currTreeNode, token, parentTuple, rootTuple)
+        if parsed then return true end
 
-        local parsed = ParseTupleName(parser, currTreeNode, token, rootTuple, parentTuple)
-        if parsed then return parsed end
+        local parsed = ParseTupleClose(parser, currTreeNode, token, parentTuple, rootTuple)
+        if parsed then return true end
+
+        local parsed = ParseTupleName(parser, currTreeNode, token, currTuple, rootTuple)
+        if parsed then return true end
+
+        -- TODO: is this neccasary?
+        local parsed = ParseTupleDatatype(parser, currTreeNode, token, parentTuple, rootTuple)
+        if parsed then return true end
     end
 
-    return parentTuple
+    return true
 end
 
 function ParseTupleDelimiter(
     parser: Parser, currTreeNode: TreeNode, token: Token, 
-    rootTuple: Tuple, tuple: Tuple
-): Tuple?
+    currTuple: Tuple, rootTuple: Tuple
+): boolean
     local tokenKind = token.Kind
-    if tokenKind ~= "SemiColon" and tokenKind ~= "Comma" then return end
+    if tokenKind ~= "SemiColon" and tokenKind ~= "Comma" then return false end
 
     local token = parser:Advance()
-    if not token then return end
+    if not token then return true end
 
     -- Handles cases where there are multiple delimiter tokens next to each other.
-    local parsed = ParseTupleDelimiter(parser, currTreeNode, token, rootTuple, tuple)
-    if parsed then return parsed end
+    local parsed = ParseTupleDelimiter(parser, currTreeNode, token, currTuple, rootTuple)
+    if parsed then return true end
 
-    local parsed = ParseTupleDatatype(parser, currTreeNode, token, rootTuple, tuple)
-    if parsed then return parsed end
+    local parsed = ParseTupleClose(parser, currTreeNode, token, currTuple, rootTuple)
+    if parsed then return true end
 
-    local parsed = ParseTupleClose(parser, currTreeNode, token, rootTuple, tuple)
-    if parsed then return parsed end
+    local parsed = ParseTupleName(parser, currTreeNode, token, currTuple, rootTuple)
+    if parsed then return true end
 
-    local parsed = ParseTupleName(parser, currTreeNode, token, rootTuple, tuple)
-    if parsed then return parsed end
+    ParseTupleDatatype(parser, currTreeNode, token, currTuple, rootTuple)
 
-    return tuple
+    return true
 end
 
 function ParseTupleDatatype(
     parser: Parser, currTreeNode: TreeNode, token: Token, 
-    rootTuple: Tuple, tuple: Tuple
-): Tuple?
-    local datatype = ParseDatatypeGroup(parser, currTreeNode, token, nil)
-    if not datatype then return end
+    currTuple: Tuple, rootTuple: Tuple
+): boolean
+    local datatype = ParseDatatypeGroup(parser, currTreeNode, token, nil, ParseDatatype)
+    if not datatype then return false end
+    
+    table.insert(currTuple.Data, datatype)
 
-    table.insert(tuple.Data, datatype)
-
-    local token = parser:Advance()
-	if not token then return end
+    -- We don't need to advance the token as parsing the datatype group already did this.
+    local token = parser.Tokens[parser.Position]
+    if not token then return true end
 	
-	local parsed = ParseTupleDelimiter(parser, currTreeNode, token, rootTuple, tuple)
-	if parsed then return parsed end
+	local parsed = ParseTupleDelimiter(parser, currTreeNode, token, currTuple, rootTuple)
+	if parsed then return true end
 
-    local parsed = ParseTupleClose(parser, currTreeNode, token, rootTuple, tuple)
-    if parsed then return parsed end
+    local parsed = ParseTupleClose(parser, currTreeNode, token, currTuple, rootTuple)
+    if parsed then return true end
 
-    local parsed = ParseTupleName(parser, currTreeNode, token, rootTuple, tuple)
-    if parsed then return parsed end
+    local parsed = ParseTupleName(parser, currTreeNode, token, currTuple, rootTuple)
+    if parsed then return true end
 
-    return tuple
+    return true
 end
 
 local function ParseTupleOpen(
@@ -658,35 +765,35 @@ local function ParseTupleOpen(
     rootTuple: Tuple?, parentTuple: Tuple?
 ): Tuple?
     if token.Kind ~= "ParensOpen" then return end
-
-    local tuple = NewTuple(tupleName, parentTuple)
+    
+    local currTuple = NewTuple(tupleName, parentTuple) :: Tuple & boolean
 
     local token = parser:Advance()
-    if not token then return end
+    if not token then return currTuple end
 
-    local rootTuple = rootTuple or tuple
+    local rootTuple = rootTuple or currTuple
 
-    local parsed = ParseTupleDelimiter(parser, currTreeNode, token, rootTuple, tuple)
-    if parsed then return parsed end
+    local parsed = ParseTupleDelimiter(parser, currTreeNode, token, currTuple, rootTuple)
+    if parsed then return currTuple end
 
-    local parsed = ParseTupleClose(parser, currTreeNode, token, rootTuple, tuple)
-    if parsed then return parsed end
+    local parsed = ParseTupleClose(parser, currTreeNode, token, currTuple, rootTuple)
+    if parsed then return currTuple end
 
-    local parsed = ParseTupleName(parser, currTreeNode, token, rootTuple, tuple)
-    if parsed then return parsed end
+    local parsed = ParseTupleName(parser, currTreeNode, token, currTuple, rootTuple)
+    if parsed then return currTuple end
 
-    local parsed = ParseTupleDatatype(parser, currTreeNode, token, rootTuple, tuple)
-    if parsed then return parsed end
+    local parsed = ParseTupleDatatype(parser, currTreeNode, token, currTuple, rootTuple)
+    if parsed then return currTuple end
 
-    return tuple
+    return currTuple
 end
 
 function ParseTupleName(
     parser: Parser, currTreeNode: TreeNode, token: Token,
-    rootTuple: Tuple?, parentTuple: Tuple?
+    parentTuple: Tuple?, rootTuple: Tuple?
 ): Tuple?
     if token.Kind ~= "Text" then
-        return ParseTupleOpen(parser, currTreeNode, token, nil, rootTuple, parentTuple)
+        return ParseTupleOpen(parser, currTreeNode, token, nil, parentTuple, rootTuple)
     end
 
     local tupleName = token.Value
@@ -694,7 +801,7 @@ function ParseTupleName(
     local token = (parser :: Parser):Advance()
     if not token then return end
 
-    return ParseTupleOpen(parser, currTreeNode, token, tupleName, rootTuple, parentTuple)
+    return ParseTupleOpen(parser, currTreeNode, token, tupleName, parentTuple, rootTuple)
 end
 
 local function ParseOperatorDatatype(parser: Parser, currTreeNode: TreeNode, token: Token): OperatorSymbol?
@@ -703,10 +810,9 @@ local function ParseOperatorDatatype(parser: Parser, currTreeNode: TreeNode, tok
     return operator
 end
 
-local function ParseDatatype(parser: Parser, currTreeNode: TreeNode, token: Token, key: string?): Datatype?
-    local parsed = ParseTupleName(parser, currTreeNode, token)
-    if parsed ~= nil then return CoerceTupleToDatatype(parsed) end
-
+function ParseDatatype(
+    parser: Parser, currTreeNode: TreeNode, token: Token, key: string?
+): (TupleData | Datatype)?
     local parsed = ParseStringDatatype(parser, currTreeNode, token)
     if parsed ~= nil then return parsed end
 
@@ -737,8 +843,17 @@ local function ParseDatatype(parser: Parser, currTreeNode: TreeNode, token: Toke
     return nil
 end
 
-local function DatatypeIsOperator(datatype: Datatype)
-    return type(datatype) == "table" and datatype.Kind == "Operator"
+local function ParseDatatypeWithTuple(
+    parser: Parser, currTreeNode: TreeNode, token: Token, key: string?
+): (TupleData | Datatype)?
+    local parsed = ParseTupleName(parser, currTreeNode, token)
+    if parsed ~= nil then return CoerceTupleToDatatype(parsed) end
+
+    return ParseDatatype(parser, currTreeNode, token, key)
+end
+
+local function DatatypeIsOperator(datatype: Datatype | TupleData)
+    return type(datatype) == "table" and (datatype :: any).Kind == "Operator"
 end
 
 local function AtomizeOperators(left: OperatorSymbol, right: OperatorSymbol)
@@ -750,7 +865,7 @@ local function AtomizeOperators(left: OperatorSymbol, right: OperatorSymbol)
         else right
 end
 
-local function FindOperatorInDatatypes(datatypes: { Datatype }, operatorKind: OperatorKind): { number }
+local function FindOperatorInDatatypes(datatypes: { Datatype | TupleData }, operatorKind: OperatorKind): { number }
     local indexes = {}
 
     for idx, datatype in datatypes do
@@ -940,7 +1055,7 @@ local DatatypeOperations: Operations = {
     },
 }
 
-local function SolveDatatypeGroup(datatypes: { Datatype }): Datatype
+local function SolveDatatypeGroup(datatypes: { Datatype | TupleData }): Datatype | TupleData
     for _, operator in OrderedOperators do
         local occurrences = FindOperatorInDatatypes(datatypes, operator.OperatorKind)
         local occurrenceIdxOffset = 0
@@ -987,8 +1102,8 @@ local function SolveDatatypeGroup(datatypes: { Datatype }): Datatype
 end
 
 local function ResolveDatatypeGroup(
-    parser: Parser, currTreeNode: TreeNode, datatypes: { Datatype }?
-): Datatype?
+    parser: Parser, currTreeNode: TreeNode, datatypes: { Datatype | TupleData }?
+): (Datatype | TupleData)?
     if not datatypes then return end
     if #datatypes == 1 then return datatypes[1] end
 
@@ -997,9 +1112,9 @@ local function ResolveDatatypeGroup(
     return SolveDatatypeGroup(datatypes)
 end
 
-local function DatatypesMightCreateThenInsert(datatypes: { Datatype }?, datatype: Datatype)
+local function DatatypesMightCreateThenInsert(datatypes: { Datatype | TupleData }?, datatype: Datatype | TupleData)
     if not datatypes then
-        datatypes = { datatype } :: { Datatype }
+        datatypes = { datatype } :: { Datatype | TupleData }
     else
         table.insert(datatypes, datatype)
     end
@@ -1007,11 +1122,16 @@ local function DatatypesMightCreateThenInsert(datatypes: { Datatype }?, datatype
     return datatypes
 end
 
+type ParseDatatype = (
+    parser: Parser, currTreeNode: TreeNode, token: Token, key: string?
+) -> (TupleData | Datatype)?
+
 function ParseDatatypeGroup(
     parser: Parser, currTreeNode: TreeNode, token: Token, key: string?,
-    datatypes: { Datatype }?, pendingOperator: OperatorSymbol?
-): Datatype?
-    local datatype = ParseDatatype(parser, currTreeNode, token, key)
+    parseDatatype: ParseDatatype,
+    datatypes: { Datatype | TupleData }?, pendingOperator: OperatorSymbol?
+): (Datatype | TupleData)?
+    local datatype = parseDatatype(parser, currTreeNode, token, key)
     if not datatype then
         return ResolveDatatypeGroup(parser, currTreeNode, datatypes)
     end
@@ -1028,7 +1148,7 @@ function ParseDatatypeGroup(
             datatypes = DatatypesMightCreateThenInsert(datatypes, pendingOperator)
             pendingOperator = nil -- Operator is no longer pending anymore.
 
-            table.insert(datatypes :: { Datatype }, datatype)
+            table.insert(datatypes :: { Datatype | TupleData }, datatype)
 
         else
             datatypes = DatatypesMightCreateThenInsert(datatypes, datatype)
@@ -1052,7 +1172,7 @@ function ParseDatatypeGroup(
                 else datatype :: OperatorSymbol
         end
 
-        return ParseDatatypeGroup(parser, currTreeNode, token, key, datatypes, pendingOperator)
+        return ParseDatatypeGroup(parser, currTreeNode, token, key, parseDatatype, datatypes, pendingOperator)
     end
 end
 
@@ -1068,7 +1188,7 @@ local function ParseAttribute(parser: Parser, currTreeNode: TreeNode, token: Tok
     local token = parser:Advance()
     if not token then return end
 
-    local datatype = ParseDatatypeGroup(parser, currTreeNode, token, attributeName)
+    local datatype = ParseDatatypeGroup(parser, currTreeNode, token, attributeName, ParseDatatypeWithTuple)
     if not datatype then return end
 
     currTreeNode.Attributes[attributeName] = datatype
@@ -1089,7 +1209,7 @@ local function ParseProperty(parser: Parser, currTreeNode: TreeNode, token: Toke
     local token = parser:Advance()
     if not token then return end
 
-    local datatype = ParseDatatypeGroup(parser, currTreeNode, token, propertyName)
+    local datatype = ParseDatatypeGroup(parser, currTreeNode, token, propertyName, ParseDatatypeWithTuple)
     if datatype == nil then return end
 
     currTreeNode.Properties[propertyName] = datatype
