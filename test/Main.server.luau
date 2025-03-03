@@ -22,30 +22,6 @@ local ButtonStyles = Rsml([[!rsml
         FontFace = $FontFace;
         TextSize = $TextSize;
 
-        ::UIGradient {
-            
-            Color = colorseq (
-                (0, tw:red),
-                (.5, tw:blue),
-                (1, tw:green)
-            );
-            
-            -- If you don't define times then they will
-            -- automatically be calculated.
-            Color = colorseq (
-                tw:red, -- time: 0
-                tw:blue, -- time: .5
-                tw:green -- time: 1
-            );
-
-            -- You can mix key points with times with ones without.
-            Color = colorseq (
-                tw:red,
-                (.5, tw:blue),
-                tw:green
-            );
-        }
-
         .Primary {
             BackgroundColor3 = $ColorPrimary;
         }

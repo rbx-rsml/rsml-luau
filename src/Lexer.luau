@@ -1,5 +1,6 @@
 --!strict
 --!optimize 2
+--!native
 --!nolint LocalShadow
 
 export type TokenDefinition = {
@@ -20,11 +21,11 @@ export type TokenKind =
     "ParensOpen" | "ParensClose" | 
     "Comma" | "SemiColon" |
     "Equals" |
-    "VariableIdentifier" | "ArgIdentifier" | "NameIdentifier" | "PsuedoIdentifier" | "StateOrEnumIdentifier" |
+    "AttributeIdentifier" | "NameIdentifier" | "PsuedoIdentifier" | "StateOrEnumIdentifier" |
     "ScopeToDescendants" | "ScopeToChildren" |
-    "PriorityDeclaration" | "DeriveDeclaration" | "MacroDeclaration" | "NameDeclaration" | "DefaultsDeclaration" |
+    "PriorityDeclaration" | "DeriveDeclaration" | "NameDeclaration" | "DefaultsDeclaration" |
     "OpAdd" | "OpSub" | "OpMult" | "OpDiv" | "OpPow" | "OpMod" |
-    "Boolean" |
+    "BoolTrue" | "BoolFalse" |
     "EnumKeyword" |
     "ColorTailwind" | "ColorBrick" | "ColorCss" | "ColorHex" | 
     "Number" | "Offset" | "ScaleOrOpMod" |
@@ -51,7 +52,7 @@ local TokenDefinitions: { TokenDefinition } = {
 
     {
         Kind = "CommentSingle",
-        Pattern = "%-%- *[^\[\n\f\r]*"
+        Pattern = "%-%- *[^%[\n\f\r]*"
     },
     
     {
@@ -87,15 +88,7 @@ local TokenDefinitions: { TokenDefinition } = {
     },
 
     {
-        Kind = "VariableIdentifier",
-        Pattern = "%$"
-    },
-    {
-        Kind = "ArgIdentifier",
-        Pattern = "!%$"
-    },
-    {
-        Kind = "VariableIdentifier",
+        Kind = "AttributeIdentifier",
         Pattern = "%$"
     },
     {
@@ -127,10 +120,6 @@ local TokenDefinitions: { TokenDefinition } = {
     {
         Kind = "DeriveDeclaration",
         Pattern = "@derive"
-    },
-    {
-        Kind = "MacroDeclaration",
-        Pattern = "@macro"
     },
     {
         Kind = "NameDeclaration",
@@ -167,11 +156,11 @@ local TokenDefinitions: { TokenDefinition } = {
     },
 
     {
-        Kind = "Boolean",
+        Kind = "BoolTrue",
         Pattern = "true"
     },
     {
-        Kind = "Boolean",
+        Kind = "BoolFalse",
         Pattern = "false"
     },
 
@@ -219,6 +208,9 @@ local TokenDefinitions: { TokenDefinition } = {
         Pattern = "%."
     },
 
+    -- Change the string tokens so that its not parsing in the lexer.
+    -- ewwwwww. This should also fix issue with multi-line strings.
+    -- yaayyyy.
     {
         Kind = "StringSingle",
         Pattern = '"([^"\n\t]+)"'

@@ -1,5 +1,6 @@
 --!strict
 --!optimize 2
+--!native
 
 local Parser = require(script.Parent.Parser)
 

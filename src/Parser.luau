@@ -1,10 +1,12 @@
 --!strict
 --!optimize 2
+--!native
 --!nolint LocalShadow
 --!nolint DuplicateLocal
 
 local Lexer = require(script.Parent.Lexer)
 type Token = Lexer.Token
+type TokenKind = Lexer.TokenKind
 
 local Colors = script.Parent.Colors
 local ColorsCss = require(Colors.Css)
@@ -44,7 +46,7 @@ end
 local function ParseCommentSingle(parser: Parser, currTreeNode: TreeNode, token: Token)
     if token.Kind ~= "CommentSingle" then return end
 
-    return parser:Advance()
+    parser:Advance()
 end
 
 function Parser.Advance(self: Parser): Lexer.Token?
@@ -60,12 +62,20 @@ function Parser.Advance(self: Parser): Lexer.Token?
     self.Position = newPosition
 
     local token = tokens[newPosition]
-    if token then ParseCommentMulti(self, self.CurrentNode, token) end
+    if token then
+        ParseCommentMulti(self, self.CurrentNode, token)
+    else
+        return
+    end
 
     local token = tokens[self.Position]
-    if token then ParseCommentSingle(self, self.CurrentNode, token) end
+    if token then
+        ParseCommentSingle(self, self.CurrentNode, token)
+    else
+        return
+    end
 
-    return self.Tokens[self.Position]
+    return tokens[self.Position]
 end
 
 function Parser.new(tokens: { Token }, rootTreeNode: TreeNode)
@@ -98,7 +108,9 @@ local OperatorSymbols: { [string]: OperatorSymbol } = {
     ["OpSub"] = OperatorSubSymbol
 }
 
-export type Datatype = string | boolean | Enum | Color3 | number | UDim | UDim2 | OperatorSymbol | Vector3 | Rect | Font | Vector2 | ColorSequenceKeypoint
+local EMPTY = { Kind = "Empty" }
+
+export type Datatype = string | boolean | Enum | Color3 | number | UDim | UDim2 | OperatorSymbol | Vector3 | Rect | Font | Vector2 | ColorSequenceKeypoint | { Kind: "Empty" }
 
 export type AttributesAndProperties = { [string]: Datatype | TupleData }
 export type Rules = { TreeNode }
@@ -182,7 +194,7 @@ local function ParseScopeDelimiter(parser: Parser, currTreeNode: TreeNode, token
 end
 
 function ParseScopeName(
-    parser: Parser, currTreeNode: TreeNode, token: Token, startPosition: number?
+    parser: Parser, currTreeNode: TreeNode, token: Token, startPosition: number
 ): true?
     local tokenKind: Lexer.TokenKind = token.Kind
     
@@ -197,15 +209,15 @@ function ParseScopeName(
         local token = parser:Advance()
 
         if token then
+            -- Parsing scope delimiters this way ensures
+            -- scope names can't start with delimiter tokens.
             local token = ParseScopeDelimiter(parser, currTreeNode, token) or token
 
-            if token then
-                if ParseScopeName(parser, currTreeNode, token, startPosition) then return end
-            end
+            if ParseScopeName(parser, currTreeNode, token, startPosition) then return end
         end
     end
 
-    if not startPosition or startPosition == parser.Position then return end
+    if startPosition == parser.Position then return end
 
     return ParseScopeOpen(parser, currTreeNode, token, startPosition)
 end
@@ -251,22 +263,31 @@ local function ParseEnumTokens(parser: Parser, startPosition: number, endPositio
     return enum :: EnumItem
 end
 
-local function ParseFullEnum(parser: Parser, currTreeNode: TreeNode, token: Token, startPosition: number?): (EnumItem | true)?
+local function ParseFullEnum(
+    parser: Parser, currTreeNode: TreeNode, token: Token, startPosition: number
+): (EnumItem | true)?
     local tokenKind: Lexer.TokenKind = token.Kind
     if tokenKind == "TagOrEnumIdentifier" or tokenKind == "StateOrEnumIdentifier" or tokenKind == "Text" then
-        startPosition = startPosition or parser.Position
-
         local token = parser:Advance()
 
         if token then
-            local fullEnum = ParseFullEnum(parser, currTreeNode, token, startPosition)
-            if fullEnum then return fullEnum end
+            local parsed = ParseFullEnum(parser, currTreeNode, token, startPosition)
+            if parsed then return parsed end
         end
     end
 
-    if not startPosition or startPosition == parser.Position then return end
+    if startPosition == parser.Position then return end
     
     return ParseEnumTokens(parser, startPosition, parser.Position - 1)
+end
+
+local function ParseEnumKeyword(parser: Parser, currTreeNode: TreeNode, token: Token)
+    if token.Kind ~= "EnumKeyword" then return end
+
+    local token = parser:Advance()
+    if not token then return end
+
+    return ParseFullEnum(parser, currTreeNode, token, parser.Position)
 end
 
 local function ParseEnumShorthand(parser: Parser, currTreeNode: TreeNode, token: Token, key: string?): (Enum | true)?
@@ -288,17 +309,10 @@ local function ParseEnumShorthand(parser: Parser, currTreeNode: TreeNode, token:
     return enum
 end
 
-local function ParseEnumKeyword(parser: Parser, currTreeNode: TreeNode, token: Token)
-    if token.Kind ~= "EnumKeyword" then return end
-
-    local token = parser:Advance()
-    if not token then return end
-
-    return ParseFullEnum(parser, currTreeNode, token)
-end
-
 local function ParseEnumDatatype(parser: Parser, currTreeNode: TreeNode, token: Token, key: string?)
-    return ParseEnumKeyword(parser, currTreeNode, token) or ParseEnumShorthand(parser, currTreeNode, token, key)
+    return 
+        ParseEnumKeyword(parser, currTreeNode, token) or 
+        ParseEnumShorthand(parser, currTreeNode, token, key)
 end
 
 local function ParseNumberScale(parser: Parser, currTreeNode: TreeNode, token: Token, num: number): UDim?
@@ -350,7 +364,8 @@ local function ParseStringMultiDatatype(parser: Parser, currTreeNode: TreeNode, 
         str ..= tokens[idx].Value
     end
 
-    -- Luau strips multiline strings up until the first occurances of multiline characters.
+    -- Luau strips multiline strings up until the first occurance of a newline character.
+    -- So we will mimic this behaviour.
     str = string.gsub(str, "^[ \t\f]*\n+", "")
 
     return str
@@ -369,33 +384,33 @@ local function ParseStringDatatype(parser: Parser, currTreeNode: TreeNode, token
     return ParseStringSingleDatatype(parser, currTreeNode, token) or ParseStringMultiDatatype(parser, currTreeNode, token)
 end
 
-local function ParseColorTailwindDatatype(parser: Parser, currTreeNode: TreeNode, token: Token): Color3?
-    if token.Kind ~= "ColorTailwind" then return end
-
+local function ParsePredefinedColor(
+    parser: Parser, token: Token, 
+    kind: TokenKind, colorsTable: { [string]: Color3 }
+): Color3?
+    if token.Kind ~= kind then return end
     parser:Advance()
-
-    return ColorsTailwind[token.Value]
+    return colorsTable[token.Value]
 end
 
-local function ParseColorCssDatatype(parser: Parser, currTreeNode: TreeNode, token: Token): Color3?
-    if token.Kind ~= "ColorCss" then return end
+local function ParsePredefinedColorDatatype(
+    parser: Parser, currTreeNode: TreeNode, token: Token
+): Color3?
+    local parsed = ParsePredefinedColor(parser, token, "ColorTailwind", ColorsTailwind)
+    if parsed then return parsed end
 
-    parser:Advance()
+    local parsed = ParsePredefinedColor(parser, token, "ColorCss", ColorsCss)
+    if parsed then return parsed end
 
-    return ColorsCss[token.Value]
+    local parsed = ParsePredefinedColor(parser, token, "ColorBrick", ColorsBrick)
+    if parsed then return parsed end
+
+    return nil
 end
 
-
-local function ParseColorBrickDatatype(parser: Parser, currTreeNode: TreeNode, token: Token): Color3?
-    if token.Kind ~= "ColorBrick" then return end
-
-    parser:Advance()
-
-    return ColorsBrick[token.Value]
-end
-
-local function ParseBoolean(parser: Parser, currTreeNode: TreeNode, token: Token): boolean?
-    if token.Kind ~= "Boolean" then return end
+local function ParseBooleanDatatype(parser: Parser, currTreeNode: TreeNode, token: Token): boolean?
+    local tokenKind = token.Kind
+    if tokenKind ~= "BoolTrue" and tokenKind ~= "BoolFalse" then return end
 
     parser:Advance()
 
@@ -403,7 +418,7 @@ local function ParseBoolean(parser: Parser, currTreeNode: TreeNode, token: Token
 end
 
 local function ParseAttributeName(parser: Parser, currTreeNode: TreeNode, token: Token): string?
-    if token.Kind ~= "VariableIdentifier" then return end
+    if token.Kind ~= "AttributeIdentifier" then return end
 
     local token = parser:Advance()
     if not token then return end
@@ -453,6 +468,9 @@ local function ColorSeqGetColorAndTime(item: Datatype): (Color3, number?)
 
     elseif typeofItem == "Color3" then
         color = item
+
+    else
+        color = Color3.new()
     end
 
     return color, if colorTime then math.clamp(colorTime, 0, 1) else nil
@@ -537,11 +555,12 @@ local TupleAnnotations: TupleAnnotationFunctions = {
         return (vector.create(xComponent, yComponent, zComponent) :: any) :: Vector3
     end,
 
+    -- TODO: add support for 2 vector 2's.
     rect = function(data)
         local minX = DefaultIfNotType(data[1], "number", 0) :: number
         local minY = DefaultIfNotType(data[2], "number", minX) :: number
-        local maxX = DefaultIfNotType(data[2], "number", minX) :: number
-        local maxY = DefaultIfNotType(data[2], "number", maxX) :: number
+        local maxX = DefaultIfNotType(data[3], "number", minX) :: number
+        local maxY = DefaultIfNotType(data[4], "number", maxX) :: number
 
         return Rect.new(minX, minY, maxX, maxY)
     end,
@@ -610,6 +629,7 @@ local TupleAnnotations: TupleAnnotationFunctions = {
         local firstColorKeypoint = colors[1]
         if firstColorKeypoint.Time ~= 0 then
             table.insert(colors, ColorSequenceKeypoint.new(0, firstColorKeypoint.Value))
+            colorsLength += 1
         end
         
         -- Ensures that the last keypoint's time is 1.
@@ -670,8 +690,7 @@ local function CoerceTupleToDatatype(tuple: Tuple): (Datatype | TupleData)?
     local tupleDataLength = #tupleData
 
     return
-        -- If the tuple has no items then there is no datatype.
-        if tupleDataLength == 0 then nil
+        if tupleDataLength == 0 then EMPTY
         -- If the tuple only has one item then it can be simplified to just that item.
         elseif tupleDataLength == 1 then tupleData[1] 
         else tupleData
@@ -699,11 +718,7 @@ local function ParseTupleClose(
         local parsed = ParseTupleClose(parser, currTreeNode, token, parentTuple, rootTuple)
         if parsed then return true end
 
-        local parsed = ParseTupleName(parser, currTreeNode, token, currTuple, rootTuple)
-        if parsed then return true end
-
-        -- TODO: is this neccasary?
-        local parsed = ParseTupleDatatype(parser, currTreeNode, token, parentTuple, rootTuple)
+        local parsed = ParseTupleName(parser, currTreeNode, token, parentTuple, rootTuple)
         if parsed then return true end
     end
 
@@ -720,7 +735,7 @@ function ParseTupleDelimiter(
     local token = parser:Advance()
     if not token then return true end
 
-    -- Handles cases where there are multiple delimiter tokens next to each other.
+    -- Handles cases of multiple delimiter tokens next to each other.
     local parsed = ParseTupleDelimiter(parser, currTreeNode, token, currTuple, rootTuple)
     if parsed then return true end
 
@@ -739,7 +754,7 @@ function ParseTupleDatatype(
     parser: Parser, currTreeNode: TreeNode, token: Token, 
     currTuple: Tuple, rootTuple: Tuple
 ): boolean
-    local datatype = ParseDatatypeGroup(parser, currTreeNode, token, nil, ParseDatatype)
+    local datatype = ParseDatatypeGroup(parser, currTreeNode, token, nil--[[, ParseDatatype]])
     if not datatype then return false end
     
     table.insert(currTuple.Data, datatype)
@@ -762,7 +777,7 @@ end
 
 local function ParseTupleOpen(
     parser: Parser, currTreeNode: TreeNode, token: Token, tupleName: string?, 
-    rootTuple: Tuple?, parentTuple: Tuple?
+    parentTuple: Tuple?, rootTuple: Tuple?
 ): Tuple?
     if token.Kind ~= "ParensOpen" then return end
     
@@ -798,7 +813,7 @@ function ParseTupleName(
 
     local tupleName = token.Value
 
-    local token = (parser :: Parser):Advance()
+    local token = parser:Advance()
     if not token then return end
 
     return ParseTupleOpen(parser, currTreeNode, token, tupleName, parentTuple, rootTuple)
@@ -813,9 +828,12 @@ end
 function ParseDatatype(
     parser: Parser, currTreeNode: TreeNode, token: Token, key: string?
 ): (TupleData | Datatype)?
+    local parsed = ParseTupleName(parser, currTreeNode, token)
+    if parsed ~= nil then return CoerceTupleToDatatype(parsed) end
+
     local parsed = ParseStringDatatype(parser, currTreeNode, token)
     if parsed ~= nil then return parsed end
-
+    
     local parsed = ParseNumberDatatype(parser, currTreeNode, token)
     if parsed ~= nil then return parsed end
 
@@ -825,31 +843,16 @@ function ParseDatatype(
     local parsed = ParseEnumDatatype(parser, currTreeNode, token, key)
     if parsed ~= nil then return parsed end
 
-    local parsed = ParseColorTailwindDatatype(parser, currTreeNode, token)
+    local parsed = ParsePredefinedColorDatatype(parser, currTreeNode, token)
     if parsed ~= nil then return parsed end
 
-    local parsed = ParseColorCssDatatype(parser, currTreeNode, token)
-    if parsed ~= nil then return parsed end
-    
-    local parsed = ParseColorBrickDatatype(parser, currTreeNode, token)
-    if parsed ~= nil then return parsed end
-
-    local parsed = ParseBoolean(parser, currTreeNode, token)
+    local parsed = ParseBooleanDatatype(parser, currTreeNode, token)
     if parsed ~= nil then return parsed end
 
     local parsed = ParseAttributeName(parser, currTreeNode, token)
     if parsed ~= nil then return `${parsed}` end
 
     return nil
-end
-
-local function ParseDatatypeWithTuple(
-    parser: Parser, currTreeNode: TreeNode, token: Token, key: string?
-): (TupleData | Datatype)?
-    local parsed = ParseTupleName(parser, currTreeNode, token)
-    if parsed ~= nil then return CoerceTupleToDatatype(parsed) end
-
-    return ParseDatatype(parser, currTreeNode, token, key)
 end
 
 local function DatatypeIsOperator(datatype: Datatype | TupleData)
@@ -865,32 +868,65 @@ local function AtomizeOperators(left: OperatorSymbol, right: OperatorSymbol)
         else right
 end
 
-local function FindOperatorInDatatypes(datatypes: { Datatype | TupleData }, operatorKind: OperatorKind): { number }
-    local indexes = {}
+local function FindOperatorsInDatatypes(
+    datatypes: { Datatype | TupleData },
+    operatorGroup: {OperatorGroupItem}
+): {{ number | OperatorGroupItem }}
+    local indexes: {{ number | OperatorGroupItem }} = {}
 
     for idx, datatype in datatypes do
-        if DatatypeIsOperator(datatype) and (datatype :: OperatorSymbol).OperatorKind == operatorKind then
-            table.insert(indexes, idx)
+        if not DatatypeIsOperator(datatype) then continue end
+
+        for _, operator in operatorGroup do
+            if operator.Symbol ~= datatype then continue end
+
+            table.insert(indexes, { idx, operator } :: { number | OperatorGroupItem })
+            break
         end
     end
 
     return indexes
 end
 
-local OrderedOperators: { OperatorSymbol } = {
-    OperatorPowSymbol, OperatorDivSymbol, OperatorModSymbol, OperatorMultSymbol,
-    OperatorAddSymbol, OperatorSubSymbol
+type OperatorGroupItem = {
+    Symbol: OperatorSymbol,
+    Fn: OperationFn
 }
-
 type OperationFn = (left: number, right: number) -> number
 
-local OperationFns: { [OperatorSymbol]: OperationFn } = {
-    [OperatorPowSymbol] = function(left: number, right: number) return left ^ right end,
-    [OperatorDivSymbol] = function(left: number, right: number) return left / right end,
-    [OperatorModSymbol] = function(left: number, right: number) return left % right end,
-    [OperatorMultSymbol] = function(left: number, right: number) return left * right end,
-    [OperatorAddSymbol] = function(left: number, right: number) return left + right end,
-    [OperatorSubSymbol] = function(left: number, right: number) return left - right end,
+local ORDERED_OPERATORS: {{ OperatorGroupItem }} = {
+    {
+        {
+            Symbol = OperatorPowSymbol,
+            Fn = function(left: number, right: number) return left ^ right end
+        }
+    },
+
+    {
+        {
+            Symbol = OperatorDivSymbol,
+            Fn = function(left: number, right: number) return left / right end
+        },
+        {
+            Symbol = OperatorModSymbol,
+            Fn = function(left: number, right: number) return left % right end
+        },
+        {
+            Symbol = OperatorMultSymbol,
+            Fn = function(left: number, right: number) return left * right end
+        },
+    },
+
+    {
+        {
+            Symbol = OperatorAddSymbol,
+            Fn = function(left: number, right: number) return left + right end
+        },
+        {
+            Symbol = OperatorSubSymbol,
+            Fn = function(left: number, right: number) return left - right end
+        },
+    }
 }
 
 type Operations = {
@@ -1056,13 +1092,13 @@ local DatatypeOperations: Operations = {
 }
 
 local function SolveDatatypeGroup(datatypes: { Datatype | TupleData }): Datatype | TupleData
-    for _, operator in OrderedOperators do
-        local occurrences = FindOperatorInDatatypes(datatypes, operator.OperatorKind)
+    for _, operatorGroup in ORDERED_OPERATORS do
+        local occurrences = FindOperatorsInDatatypes(datatypes, operatorGroup)
         local occurrenceIdxOffset = 0
 
-        local operationFn = OperationFns[operator]
+        for _, occurrence in occurrences do
+            local occurrenceIdx = occurrence[1] :: number
 
-        for _, occurrenceIdx in occurrences do
             occurrenceIdx -= occurrenceIdxOffset
 
             local rightIdx = occurrenceIdx + 1
@@ -1079,6 +1115,7 @@ local function SolveDatatypeGroup(datatypes: { Datatype | TupleData }): Datatype
             else
                 local leftIdx = occurrenceIdx - 1
                 left = table.remove(datatypes, leftIdx) :: Datatype
+                if left == EMPTY then left = 0 end
                 occurrenceIdxOffset += 1
             end
 
@@ -1094,6 +1131,7 @@ local function SolveDatatypeGroup(datatypes: { Datatype | TupleData }): Datatype
                 continue
             end
 
+            local operationFn = (occurrence[2] :: OperatorGroupItem).Fn
             datatypes[occurrenceIdx - 1] = datatypeOperationFn(left, right, operationFn)
         end
     end
@@ -1107,16 +1145,15 @@ local function ResolveDatatypeGroup(
     if not datatypes then return end
     if #datatypes == 1 then return datatypes[1] end
 
-    parser:Advance()
 
     return SolveDatatypeGroup(datatypes)
 end
 
-local function DatatypesMightCreateThenInsert(datatypes: { Datatype | TupleData }?, datatype: Datatype | TupleData)
+local function DatatypesEnsureExistsThenInsert(datatypes: { Datatype | TupleData }?, toInsert: Datatype | TupleData)
     if not datatypes then
-        datatypes = { datatype } :: { Datatype | TupleData }
+        datatypes = { toInsert } :: { Datatype | TupleData }
     else
-        table.insert(datatypes, datatype)
+        table.insert(datatypes, toInsert)
     end
 
     return datatypes
@@ -1128,10 +1165,9 @@ type ParseDatatype = (
 
 function ParseDatatypeGroup(
     parser: Parser, currTreeNode: TreeNode, token: Token, key: string?,
-    parseDatatype: ParseDatatype,
     datatypes: { Datatype | TupleData }?, pendingOperator: OperatorSymbol?
 ): (Datatype | TupleData)?
-    local datatype = parseDatatype(parser, currTreeNode, token, key)
+    local datatype = ParseDatatype(parser, currTreeNode, token, key)
     if not datatype then
         return ResolveDatatypeGroup(parser, currTreeNode, datatypes)
     end
@@ -1145,13 +1181,13 @@ function ParseDatatypeGroup(
         if pendingOperator then
             -- We can add our pending operator to the datatypes table
             -- since it has no other operator to atomise with.
-            datatypes = DatatypesMightCreateThenInsert(datatypes, pendingOperator)
+            datatypes = DatatypesEnsureExistsThenInsert(datatypes, pendingOperator)
             pendingOperator = nil -- Operator is no longer pending anymore.
 
             table.insert(datatypes :: { Datatype | TupleData }, datatype)
 
         else
-            datatypes = DatatypesMightCreateThenInsert(datatypes, datatype)
+            datatypes = DatatypesEnsureExistsThenInsert(datatypes, datatype)
         end
     end
 
@@ -1172,11 +1208,11 @@ function ParseDatatypeGroup(
                 else datatype :: OperatorSymbol
         end
 
-        return ParseDatatypeGroup(parser, currTreeNode, token, key, parseDatatype, datatypes, pendingOperator)
+        return ParseDatatypeGroup(parser, currTreeNode, token, key--[[, parseDatatype]], datatypes, pendingOperator)
     end
 end
 
-local function ParseAttribute(parser: Parser, currTreeNode: TreeNode, token: Token): true?
+local function ParseAttribute(parser: Parser, currTreeNode: TreeNode, token: Token)
     local attributeName = ParseAttributeName(parser, currTreeNode, token)
     if not attributeName then return end
 
@@ -1188,14 +1224,13 @@ local function ParseAttribute(parser: Parser, currTreeNode: TreeNode, token: Tok
     local token = parser:Advance()
     if not token then return end
 
-    local datatype = ParseDatatypeGroup(parser, currTreeNode, token, attributeName, ParseDatatypeWithTuple)
+    local datatype = ParseDatatypeGroup(parser, currTreeNode, token, attributeName)
     if not datatype then return end
 
     currTreeNode.Attributes[attributeName] = datatype
-    return true
 end
 
-local function ParseProperty(parser: Parser, currTreeNode: TreeNode, token: Token): true?
+local function ParseProperty(parser: Parser, currTreeNode: TreeNode, token: Token)
     local propertyName = ParseText(parser, currTreeNode, token)
     if not propertyName then return end
 
@@ -1209,11 +1244,10 @@ local function ParseProperty(parser: Parser, currTreeNode: TreeNode, token: Toke
     local token = parser:Advance()
     if not token then return end
 
-    local datatype = ParseDatatypeGroup(parser, currTreeNode, token, propertyName, ParseDatatypeWithTuple)
+    local datatype = ParseDatatypeGroup(parser, currTreeNode, token, propertyName)
     if datatype == nil then return end
 
     currTreeNode.Properties[propertyName] = datatype
-    return true
 end
 
 local function ParsePriorityValue(parser: Parser, currTreeNode: TreeNode, token: Token): number?
@@ -1222,7 +1256,7 @@ local function ParsePriorityValue(parser: Parser, currTreeNode: TreeNode, token:
     return math.floor(tonumber(token.Value) :: number)
 end
 
-local function ParsePriorityDeclaration(parser: Parser, currTreeNode: TreeNode, token: Token): true?
+local function ParsePriorityDeclaration(parser: Parser, currTreeNode: TreeNode, token: Token)
     if token.Kind ~= "PriorityDeclaration" then return end
 
     local token = parser:Advance()
@@ -1232,11 +1266,9 @@ local function ParsePriorityDeclaration(parser: Parser, currTreeNode: TreeNode, 
     if not priorityValue then return end
 
     currTreeNode.Priority = priorityValue
-
-    return true
 end
 
-local function ParseNameDeclaration(parser: Parser, currTreeNode: TreeNode, token: Token): true?
+local function ParseNameDeclaration(parser: Parser, currTreeNode: TreeNode, token: Token)
     if token.Kind ~= "NameDeclaration" then return end
 
     local token = parser:Advance()
@@ -1246,16 +1278,12 @@ local function ParseNameDeclaration(parser: Parser, currTreeNode: TreeNode, toke
     if not nameValue then return end
 
     currTreeNode.Name = nameValue
-
-    return true
 end
 
-local function ParseDefaultsDeclaration(parser: Parser, currTreeNode: TreeNode, token: Token): true?
+local function ParseDefaultsDeclaration(parser: Parser, currTreeNode: TreeNode, token: Token)
     if token.Kind ~= "DefaultsDeclaration" then return end
 
     table.insert(currTreeNode.Derives, "@defaults")
-
-    return true
 end
 
 local function ParseRsml(tokens: { Token })
@@ -1271,8 +1299,9 @@ local function ParseRsml(tokens: { Token })
         local token = tokens[parser.Position]
         if token then ParseAttribute(parser, parser.CurrentNode, token) end
 
-        local token = tokens[parser.Position]
-        if token then ParseScopeName(parser, parser.CurrentNode, token) end
+        local parserPosition = parser.Position
+        local token = tokens[parserPosition]
+        if token then ParseScopeName(parser, parser.CurrentNode, token, parserPosition) end
 
         local token = tokens[parser.Position]
         if token then ParseScopeClose(parser, parser.CurrentNode, token) end
