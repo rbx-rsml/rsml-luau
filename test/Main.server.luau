@@ -12,11 +12,10 @@ local AttributeStyles = Rsml [[!rsml
 ]]
 
 local ButtonStyles = Rsml([[!rsml
-    @defaults;
     @name "ButtonStyles";
+    @derive ("./AttributeStyles", "@defaults");
 
     .Button {
-        @priority 50;
         AutomaticSize = :XY;
         TextColor3 = $ColorText;
         FontFace = $FontFace;

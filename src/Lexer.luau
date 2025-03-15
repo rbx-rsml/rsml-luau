@@ -32,8 +32,9 @@ export type TokenKind =
     "TagOrEnumIdentifier" |
     "StringSingle" |
     "RobloxAsset" |
-    "Text" | "Empty"
+    "Text" | "Error"
 
+export type Lexer = () -> Token?
 
 local TokenDefinitions: { TokenDefinition } = {
     {
@@ -246,13 +247,9 @@ for _, token in TokenDefinitions do
 end
 
 local function LexRsml(content: string)
-    local cursorIdx, contentLength = 0, #content
+    local cursorIdx = 0
 
-    local tokens: { Token } = {}
-
-    while cursorIdx < contentLength do
-        local matchFound = false
-
+    return function(): Token?
         for _, token in TokenDefinitions do
             local start, finish, capture = string.find(content, token.Pattern, cursorIdx)
             if start == nil then continue end
@@ -273,28 +270,21 @@ local function LexRsml(content: string)
 
             cursorIdx = (finish :: number) + 1
 
-            table.insert(tokens, {
+            return {
                 Kind = token.Kind,
                 Value = value
-            })
-
-            matchFound = true
-            break
+            }
         end
 
-        if not matchFound then
-            local start, finish = string.find(content, "[ \n\f\t\r]+", cursorIdx)
-            if not start then break end
-            cursorIdx = (finish :: number) + 1
+        local start, finish = string.find(content, "[ \n\f\t\r]+", cursorIdx)
+        if not start then return nil end
+        cursorIdx = (finish :: number) + 1
 
-            table.insert(tokens, {
-                Kind = "Empty",
-                Value = string.sub(content, start, finish)
-            })
-        end
+        return {
+            Kind = "Error",
+            Value = string.sub(content, start, finish)
+        }
     end
-
-    return tokens
 end
 
 return LexRsml

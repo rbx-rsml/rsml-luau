@@ -10,5 +10,3 @@ local DefaultStyles = require(script.DefaultStyles)
 return function(content: string, derives: { StyleSheet }?)
     return ConvertRsml(ParseRsml(LexRsml(content)), derives, DefaultStyles)
 end
-
-
