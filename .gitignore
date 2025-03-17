@@ -10,3 +10,9 @@
 .DS_STORE
 
 /sourcemap.json
+/test
+
+/rbxts/src
+/rbxts/test
+/rbxts/LICENSE.md
+/rbxts/package.json

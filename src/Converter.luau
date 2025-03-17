@@ -73,7 +73,7 @@ local function ApplyDerive(styleSheet: StyleSheet, parent: StyleSheet)
     derive.Parent = parent
 end
 
-local function ApplyAttributes(attributes: Parser.AttributesAndProperties, parent: StyleParent)
+local function ApplyAttributes(attributes: { [string]: Parser.Datatype }, parent: StyleParent)
     for attributeName, datatype in attributes do
         -- Attribute's can't start with RBX or be more than 100 characters.
         -- If this is the case then we return that parsing was successful -
@@ -85,7 +85,7 @@ local function ApplyAttributes(attributes: Parser.AttributesAndProperties, paren
     end
 end
 
-local function ApplyRules(rules: Parser.Rules, parent: StyleParent)
+local function ApplyRules(rules: { Parser.TreeNode }, parent: StyleParent)
     for _, node in rules do
         local selector = node.Selector :: string
         local priority = node.Priority

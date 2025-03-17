@@ -31,7 +31,7 @@ export type TokenKind =
     "Number" | "Offset" | "ScaleOrOpMod" |
     "TagOrEnumIdentifier" |
     "StringSingle" |
-    "RobloxAsset" |
+    "RobloxAsset" | "RobloxContent" |
     "Text" | "Error"
 
 export type Lexer = () -> Token?
@@ -209,29 +209,55 @@ local TokenDefinitions: { TokenDefinition } = {
         Pattern = "%."
     },
 
-    -- Change the string tokens so that its not parsing in the lexer.
-    -- ewwwwww. This should also fix issue with multi-line strings.
-    -- yaayyyy.
     {
         Kind = "StringSingle",
-        Pattern = '"([^"\n\t]+)"'
+        Pattern = '"[^"\n\t]+"'
     },
     {
         Kind = "StringSingle",
-        Pattern = '"()"'
+        Pattern = '""'
     },
     {
         Kind = "StringSingle",
-        Pattern = "'([^'\n\t]+)'"
+        Pattern = "'[^'\n\t]+'"
     },
     {
         Kind = "StringSingle",
-        Pattern = "'()'"
+        Pattern = "''"
     },
 
     {
         Kind = "RobloxAsset",
         Pattern = "rbxassetid://[0-9]+"
+    },
+    {
+        Kind = "RobloxAsset",
+        Pattern = "rbxasset://[^) ]+"
+    },
+    {
+        Kind = "RobloxAsset",
+        Pattern = "rbxthumb://[^) ]+"
+    },
+    {
+        Kind = "RobloxAsset",
+        Pattern = "rbxgameasset://[^) ]+"
+    },
+    {
+        Kind = "RobloxAsset",
+        Pattern = "rbxhttp://[^) ]+"
+    },
+    {
+        Kind = "RobloxAsset",
+        Pattern = "rbxtemp://[^) ]+"
+    },
+    {
+        Kind = "RobloxAsset",
+        Pattern = "https?://[^) ]+"
+    },
+
+    {
+        Kind = "RobloxContent",
+        Pattern = "contentid://[0-9]+"
     },
 
     {

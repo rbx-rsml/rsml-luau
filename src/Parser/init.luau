@@ -30,7 +30,7 @@ local function ParseCommentMultiEnd(parser: Parser, startEqualsAmount: number): 
 
         if token.Kind == "StringMultiEnd" then
             local endTokenValue = token.Value
-            local endEqualsAmount = #string.sub(endTokenValue, 2, #endTokenValue - 1)
+            local endEqualsAmount = #string.sub(endTokenValue, 2, -2)
 
             if startEqualsAmount == endEqualsAmount then
                 return parser:CoreAdvance()
@@ -43,7 +43,7 @@ local function ParseCommentMulti(parser: Parser, token: Token): Token?
     if token.Kind ~= "CommentMultiStart" then return end
 
     local tokenValue = token.Value
-    local startEqualsAmount = #string.sub(tokenValue, 4, #tokenValue - 1)
+    local startEqualsAmount = #string.sub(tokenValue, 4, -2)
 
     return ParseCommentMultiEnd(parser, startEqualsAmount)
 end
@@ -86,8 +86,8 @@ function Parser.new(lexer: Lexer, rootTreeNode: TreeNode)
     return parser
 end
 
-type OperatorKind = "OpPow" | "OpDiv" | "OpMod" | "OpMult" | "OpAdd" | "OpSub"
-type OperatorSymbol = { Kind: "Operator", OperatorKind: OperatorKind }
+export type OperatorKind = "OpPow" | "OpDiv" | "OpMod" | "OpMult" | "OpAdd" | "OpSub"
+export type OperatorSymbol = { Kind: "Operator", OperatorKind: OperatorKind }
 
 local OperatorPowSymbol: OperatorSymbol = { Kind = "Operator", OperatorKind = "OpPow" }
 local OperatorDivSymbol: OperatorSymbol = { Kind = "Operator", OperatorKind = "OpDiv" }
@@ -106,14 +106,11 @@ local OperatorSymbols: { [string]: OperatorSymbol } = {
 
 local EMPTY = { Kind = "Empty" }
 
-export type Datatype = string | boolean | EnumItem | Color3 | number | UDim | UDim2 | OperatorSymbol | Vector3 | Rect | Font | Vector2 | ColorSequenceKeypoint | { Kind: "Empty" } | TupleData
-
-export type AttributesAndProperties = { [string]: Datatype }
-export type Rules = { TreeNode }
+export type Datatype = string | boolean | EnumItem | Color3 | number | UDim | UDim2 | OperatorSymbol | Vector3 | Rect | Font | Vector2 | ColorSequenceKeypoint | { Kind: "Empty" } | TupleData | Content | Vector2int16 | Vector3int16
 
 export type TreeNode = {
-    Attributes: AttributesAndProperties,
-    Properties: AttributesAndProperties,
+    Attributes: { [string]: Datatype },
+    Properties: { [string]: Datatype },
     Name: string?,
     Rules: { TreeNode },
     Derives: { [string]: true },
@@ -122,7 +119,7 @@ export type TreeNode = {
     Parent: TreeNode
 }
 
-export type Parser = typeof(setmetatable({} :: {
+type Parser = typeof(setmetatable({} :: {
     Lexer: Lexer,
 
     TreeNodes: { TreeNode },
@@ -383,7 +380,7 @@ local function ParseStringMultiEnd(parser: Parser, startEqualsAmount: number, to
 
         if token.Kind == "StringMultiEnd" then
             local endTokenValue = token.Value
-            local endEqualsAmount = #string.sub(endTokenValue, 2, #endTokenValue - 1)
+            local endEqualsAmount = #string.sub(endTokenValue, 2, -2)
 
             if startEqualsAmount == endEqualsAmount then
                 return parser:CoreAdvance()
@@ -398,7 +395,7 @@ local function ParseStringMultiDatatype(parser: Parser, token: Token): (Token?, 
     if token.Kind ~= "StringMultiStart" then return token, nil end
 
     local tokenValue = token.Value
-    local startEqualsAmount = #string.sub(tokenValue, 4, #tokenValue - 1)
+    local startEqualsAmount = #string.sub(tokenValue, 4, -2)
 
     local tokenHistory = {}
     local token = ParseStringMultiEnd(parser, startEqualsAmount, tokenHistory)
@@ -416,11 +413,23 @@ local function ParseStringMultiDatatype(parser: Parser, token: Token): (Token?, 
     return token, str
 end
 
+local function ParseContentDatatype(parser: Parser, token: Token): (Token?, Content?)
+    if token.Kind ~= "RobloxContent" then return token, nil end
+
+    return parser:Advance(), Content.fromAssetId(tonumber(string.sub(token.Value, 11)) :: number)
+end
+
 local function ParseStringSingleDatatype(parser: Parser, token: Token): (Token?, string?)
     local tokenKind: TokenKind = token.Kind
-    if tokenKind ~= "StringSingle" and tokenKind ~= "RobloxAsset" then return token, nil end
 
-    return parser:Advance(), token.Value
+    if tokenKind == "StringSingle" then
+        return parser:Advance(), string.sub(token.Value, 2, -2)
+
+    elseif tokenKind == "RobloxAsset" then
+        return parser:Advance(), token.Value
+    end
+
+    return token, nil
 end
 
 local function ParseStringDatatype(parser: Parser, token: Token): (Token?, string?)
@@ -472,6 +481,16 @@ local function ParseAttributeNameDatatype(parser: Parser, token: Token): (Token?
     return parser:Advance(), token.Value
 end
 
+local function DefaultIfNotVector3Any(target: any, default: Vector3): Vector3
+    local typeofTarget = typeof(target)
+    return if typeofTarget ~= "Vector3" and typeofTarget ~= "Vector3int16" then default else target
+end
+
+local function DefaultIfNotVector2Any(target: any, default: Vector2): Vector2
+    local typeofTarget = typeof(target)
+    return if typeofTarget ~= "Vector2" and typeofTarget ~= "Vector2int16" then default else target
+end
+
 local function DefaultIfNotType<T>(target: T, expectedType: string, default: T): T
     return if type(target) ~= expectedType then default else target
 end
@@ -483,9 +502,9 @@ local function CoerceToUDim<T>(target: T, default: UDim): UDim
     return default
 end
 
-type TupleData = { Datatype | { TupleData } }
+export type TupleData = { Datatype | { TupleData } }
 
-type Tuple = {
+export type Tuple = {
     Name: string?,
     Parent: Tuple?,
     Data: TupleData,
@@ -512,6 +531,8 @@ type TupleAnnotationFunctions = {
     colorseq: TupleAnnotationFunction<ColorSequence>,
     numseq: TupleAnnotationFunction<NumberSequence>,
     font: TupleAnnotationFunction<Font>,
+    content: TupleAnnotationFunction<Content>,
+    numrange: TupleAnnotationFunction<NumberRange>,
 }
 
 local TupleAnnotations: TupleAnnotationFunctions = {
@@ -545,6 +566,13 @@ local TupleAnnotations: TupleAnnotationFunctions = {
         return Vector2.new(xComponent, yComponent)
     end,
 
+    vec2i16 = function(data)
+        local xComponent = DefaultIfNotType(data[1], "number", 0) :: number
+        local yComponent = DefaultIfNotType(data[2], "number", xComponent) :: number
+
+        return Vector2int16.new(xComponent, yComponent)
+    end,
+
     vec3 = function(data)
         local xComponent = DefaultIfNotType(data[1], "number", 0) :: number
         local yComponent = DefaultIfNotType(data[2], "number", xComponent) :: number
@@ -553,14 +581,71 @@ local TupleAnnotations: TupleAnnotationFunctions = {
         return (vector.create(xComponent, yComponent, zComponent) :: any) :: Vector3
     end,
 
-    -- TODO: add support for 2 vector 2's.
-    rect = function(data)
-        local minX = DefaultIfNotType(data[1], "number", 0) :: number
-        local minY = DefaultIfNotType(data[2], "number", minX) :: number
-        local maxX = DefaultIfNotType(data[3], "number", minX) :: number
-        local maxY = DefaultIfNotType(data[4], "number", maxX) :: number
+    vec3i16 = function(data)
+        local xComponent = DefaultIfNotType(data[1], "number", 0) :: number
+        local yComponent = DefaultIfNotType(data[2], "number", xComponent) :: number
+        local zComponent = DefaultIfNotType(data[3], "number", yComponent) :: number
 
-        return Rect.new(minX, minY, maxX, maxY)
+        return Vector3int16.new(xComponent, yComponent, zComponent)
+    end,
+
+    cframe = function(data)
+        local data1 = data[1]
+
+        if type(data1) == "number" then
+            local posXComponent = data1
+            local posYComponent = DefaultIfNotType(data[2], "number", posXComponent)
+            local posZComponent = DefaultIfNotType(data[3], "number", posYComponent)
+
+            local orienXXComponent = DefaultIfNotType(data[4], "number", 0)
+            local orienXYComponent = DefaultIfNotType(data[5], "number", orienXXComponent)
+            local orienXZComponent = DefaultIfNotType(data[6], "number", orienXYComponent)
+
+            local orienYXComponent = DefaultIfNotType(data[7], "number", 0)
+            local orienYYComponent = DefaultIfNotType(data[8], "number", orienYXComponent)
+            local orienYZComponent = DefaultIfNotType(data[9], "number", orienYYComponent)
+
+            local orienZXComponent = DefaultIfNotType(data[10], "number", 0)
+            local orienZYComponent = DefaultIfNotType(data[11], "number", orienZXComponent)
+            local orienZZComponent = DefaultIfNotType(data[12], "number", orienZYComponent)
+
+            return CFrame.new(
+                posXComponent, posYComponent, posZComponent,
+                orienXXComponent, orienXYComponent, orienXZComponent,
+                orienYXComponent, orienYYComponent, orienYZComponent,
+                orienZXComponent, orienZYComponent, orienZZComponent
+            )
+
+        else
+            local posComponent = DefaultIfNotVector3Any(data[1], Vector3.zero)
+            local orienXComponent = DefaultIfNotVector3Any(data[2], Vector3.zero)
+            local orienYComponent = DefaultIfNotVector3Any(data[3], orienXComponent)
+            local orienZComponent = DefaultIfNotVector3Any(data[4], orienYComponent)
+
+            return CFrame.new(
+                posComponent.X, posComponent.Y, posComponent.Z,
+                orienXComponent.X, orienXComponent.Y, orienXComponent.Z,
+                orienYComponent.X, orienYComponent.Y, orienYComponent.Z,
+                orienZComponent.X, orienZComponent.Y, orienZComponent.Z
+            )
+        end
+    end,
+
+    rect = function(data)
+        if #data == 2 then
+            local min = DefaultIfNotVector2Any(data[1], Vector2.zero)
+            local max = DefaultIfNotVector2Any(data[2], min)
+
+            return Rect.new(min, max)
+
+        else
+            local minX = DefaultIfNotType(data[1], "number", 0) :: number
+            local minY = DefaultIfNotType(data[2], "number", minX) :: number
+            local maxX = DefaultIfNotType(data[3], "number", minX) :: number
+            local maxY = DefaultIfNotType(data[4], "number", maxX) :: number
+
+            return Rect.new(minX, minY, maxX, maxY)
+        end
     end,
 
     color3 = function(data)
@@ -579,7 +664,12 @@ local TupleAnnotations: TupleAnnotationFunctions = {
         return Color3.fromRGB(red, green, blue)
     end,
 
+    brickcolor = function(data)
+        return BrickColor.new(DefaultIfNotType(data[1], "string", "Black") :: any)
+    end,
+
     colorseq = ColorSeqTupleAnnotation :: TupleAnnotationFunction<ColorSequence>,
+
     numseq = NumSeqTupleAnnotation :: TupleAnnotationFunction<NumberSequence>,
 
     font = function(data)
@@ -618,6 +708,24 @@ local TupleAnnotations: TupleAnnotationFunctions = {
         
         return Font.new(fontFamily :: string, fontWeight, fontStyle)
     end,
+
+    content = function(data)
+        local content = data[1]
+        if not content then return Content.none end
+        
+        local contentType = type(content)
+        return
+            if contentType == "number" then Content.fromAssetId(content :: number)
+            elseif contentType == "string" then Content.fromUri(content :: string)
+            else Content.none 
+    end,
+
+    numrange = function(data)
+        local min = DefaultIfNotType(data[1], "number", 0) :: number
+        local max = DefaultIfNotType(data[2], "number", min) :: number
+
+        return NumberRange.new(min, max)
+    end
 }
 
 local function CoerceTupleToDatatype(tuple: Tuple): Datatype?
@@ -793,6 +901,9 @@ function ParseDatatype(
     local _token, datatype = ParseAttributeNameDatatype(parser, token)
     if datatype ~= nil then return _token, `${datatype}` end
 
+    local _token, datatype = ParseContentDatatype(parser, token)
+    if datatype ~= nil then return _token, datatype end
+
     return token, nil
 end
 
@@ -918,8 +1029,23 @@ local DatatypeOperations: Operations = {
             )
         end,
 
+        ["Vector3int16"] = function(left: number, right: Vector3int16, operationFn): Vector3int16
+            return Vector3int16.new(
+                operationFn(left, right.X), 
+                operationFn(left, right.Y),
+                operationFn(left, right.Z)
+            )
+        end,
+
         ["Vector2"] = function(left: number, right: Vector2, operationFn): Vector2
             return Vector2.new(
+                operationFn(left, right.X), 
+                operationFn(left, right.Y)
+            )
+        end,
+
+        ["Vector2int16"] = function(left: number, right: Vector2int16, operationFn): Vector2int16
+            return Vector2int16.new(
                 operationFn(left, right.X), 
                 operationFn(left, right.Y)
             )
@@ -982,8 +1108,42 @@ local DatatypeOperations: Operations = {
             )
         end,
 
+        ["Vector3int16"] = function(left: Vector3, right: Vector3int16, operationFn): Vector3
+            return Vector3.new(
+                operationFn(left.X, right.X), 
+                operationFn(left.Y, right.Y),
+                operationFn(left.Z, right.Z)
+            )
+        end,
+
         ["Vector3"] = function(left: Vector3, right: Vector3, operationFn): Vector3
             return Vector3.new(
+                operationFn(left.X, right.X), 
+                operationFn(left.Y, right.Y),
+                operationFn(left.Z, right.Z)
+            )
+        end,
+    },
+
+    ["Vector3int16"] = {
+        ["number"] = function(left: Vector3int16, right: number, operationFn): Vector3int16
+            return Vector3int16.new(
+                operationFn(left.X, right), 
+                operationFn(left.Y, right),
+                operationFn(left.Z, right)
+            )
+        end,
+
+        ["Vector3"] = function(left: Vector3int16, right: Vector3, operationFn): Vector3int16
+            return Vector3int16.new(
+                operationFn(left.X, right.X), 
+                operationFn(left.Y, right.Y),
+                operationFn(left.Z, right.Z)
+            )
+        end,
+
+        ["Vector3int16"] = function(left: Vector3int16, right: Vector3int16, operationFn): Vector3int16
+            return Vector3int16.new(
                 operationFn(left.X, right.X), 
                 operationFn(left.Y, right.Y),
                 operationFn(left.Z, right.Z)
@@ -999,8 +1159,38 @@ local DatatypeOperations: Operations = {
             )
         end,
 
+        ["Vector2int16"] = function(left: Vector2, right: Vector2int16, operationFn): Vector2
+            return Vector2.new(
+                operationFn(left.X, right.X), 
+                operationFn(left.Y, right.Y)
+            )
+        end,
+
         ["Vector2"] = function(left: Vector2, right: Vector2, operationFn): Vector2
             return Vector2.new(
+                operationFn(left.X, right.X), 
+                operationFn(left.Y, right.Y)
+            )
+        end,
+    },
+
+    ["Vector2int16"] = {
+        ["number"] = function(left: Vector2int16, right: number, operationFn): Vector2int16
+            return Vector2int16.new(
+                operationFn(left.X, right), 
+                operationFn(left.Y, right)
+            )
+        end,
+
+        ["Vector2"] = function(left: Vector2int16, right: Vector2, operationFn): Vector2int16
+            return Vector2int16.new(
+                operationFn(left.X, right.X), 
+                operationFn(left.Y, right.Y)
+            )
+        end,
+
+        ["Vector2int16"] = function(left: Vector2int16, right: Vector2int16, operationFn): Vector2int16
+            return Vector2int16.new(
                 operationFn(left.X, right.X), 
                 operationFn(left.Y, right.Y)
             )
@@ -1325,7 +1515,7 @@ local function ParseDeriveDeclaration(parser: Parser, token: Token, currTreeNode
     return token
 end
 
-local function ParseRsml(lexer: Lexer)
+local function ParseRsml(lexer: Lexer): TreeNode
     local rootTreeNode = NewTreeNode(nil :: any)
     rootTreeNode.Parent = rootTreeNode
 
