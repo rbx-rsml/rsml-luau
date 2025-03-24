@@ -23,15 +23,15 @@ export type TokenKind =
     "Equals" |
     "AttributeIdentifier" | "NameIdentifier" | "PsuedoIdentifier" | "StateOrEnumIdentifier" |
     "ScopeToDescendants" | "ScopeToChildren" |
-    "PriorityDeclaration" | "DeriveDeclaration" | "NameDeclaration" | "DefaultsDeclaration" |
-    "OpAdd" | "OpSub" | "OpMult" | "OpDiv" | "OpPow" | "OpMod" |
+    "PriorityDeclaration" | "DeriveDeclaration" | "NameDeclaration" |
+    "OpAdd" | "OpSub" | "OpMult" | "OpDiv" | "OpFloorDiv" | "OpPow" | "OpMod" |
     "BoolTrue" | "BoolFalse" |
     "EnumKeyword" |
     "ColorTailwind" | "ColorBrick" | "ColorCss" | "ColorHex" | 
     "Number" | "Offset" | "ScaleOrOpMod" |
     "TagOrEnumIdentifier" |
     "StringSingle" |
-    "RobloxAsset" | "RobloxContent" |
+    "RobloxAsset" |
     "Text" | "Error"
 
 export type Lexer = () -> Token?
@@ -126,10 +126,6 @@ local TokenDefinitions: { TokenDefinition } = {
         Kind = "NameDeclaration",
         Pattern = "@name"
     },
-    {
-        Kind = "DefaultsDeclaration",
-        Pattern = "@defaults"
-    },
 
     {
         Kind = "OpAdd",
@@ -142,6 +138,10 @@ local TokenDefinitions: { TokenDefinition } = {
     {
         Kind = "OpMult",
         Pattern = "%*"
+    },
+    {
+        Kind = "OpFloorDiv",
+        Pattern = "//"
     },
     {
         Kind = "OpDiv",
@@ -172,19 +172,19 @@ local TokenDefinitions: { TokenDefinition } = {
 
     {
         Kind = "ColorTailwind",
-        Pattern = "tw:[a-z]+:%d+"
+        Pattern = "[Tt][Ww]:[A-Za-z]+:%d+"
     },
     {
         Kind = "ColorTailwind",
-        Pattern = "tw:[a-z]+"
+        Pattern = "[Tt][Ww]:[A-Za-z]+"
     },
     {
         Kind = "ColorBrick",
-        Pattern = "bc:[a-z]+"
+        Pattern = "[Bb][Cc]:[A-Za-z]+"
     },
     {
         Kind = "ColorCss",
-        Pattern = "css:[a-z]+"
+        Pattern = "[Cc][Ss][Ss]:[A-Za-z]+"
     },
     {
         Kind = "ColorHex",
@@ -228,7 +228,7 @@ local TokenDefinitions: { TokenDefinition } = {
 
     {
         Kind = "RobloxAsset",
-        Pattern = "rbxassetid://[0-9]+"
+        Pattern = "rbxassetid://%d+"
     },
     {
         Kind = "RobloxAsset",
@@ -256,13 +256,8 @@ local TokenDefinitions: { TokenDefinition } = {
     },
 
     {
-        Kind = "RobloxContent",
-        Pattern = "contentid://[0-9]+"
-    },
-
-    {
         Kind = "Text",
-        Pattern = "[a-zA-Z0-9_]+-?[a-zA-Z0-9_]*"
+        Pattern = "[_a-zA-Z][_A-Za-z0-9]*"
     },
 }
 
@@ -277,28 +272,14 @@ local function LexRsml(content: string)
 
     return function(): Token?
         for _, token in TokenDefinitions do
-            local start, finish, capture = string.find(content, token.Pattern, cursorIdx)
-            if start == nil then continue end
-
-            local value
-            if capture then
-                if type(capture) == "number" then
-                    value = ""
-                else
-                    local capStart, capFinish = string.find(string.sub(content, start, finish), capture, 1, true)
-                    local start = start + capStart :: number - 1
-                    local finish = start + (capFinish :: number - capStart :: number) 
-                    value = string.sub(content, start, finish)
-                end
-            else
-                value = string.sub(content, start, finish)
-            end
+            local start, finish = string.find(content, token.Pattern, cursorIdx)
+            if not start then continue end
 
             cursorIdx = (finish :: number) + 1
 
             return {
                 Kind = token.Kind,
-                Value = value
+                Value = string.sub(content, start, finish)
             }
         end
 

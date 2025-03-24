@@ -86,11 +86,12 @@ function Parser.new(lexer: Lexer, rootTreeNode: TreeNode)
     return parser
 end
 
-export type OperatorKind = "OpPow" | "OpDiv" | "OpMod" | "OpMult" | "OpAdd" | "OpSub"
+export type OperatorKind = "OpPow" | "OpDiv" | "OpFloorDiv" | "OpMod" | "OpMult" | "OpAdd" | "OpSub"
 export type OperatorSymbol = { Kind: "Operator", OperatorKind: OperatorKind }
 
 local OperatorPowSymbol: OperatorSymbol = { Kind = "Operator", OperatorKind = "OpPow" }
 local OperatorDivSymbol: OperatorSymbol = { Kind = "Operator", OperatorKind = "OpDiv" }
+local OperatorFloorDivSymbol: OperatorSymbol = { Kind = "Operator", OperatorKind = "OpFloorDiv" }
 local OperatorModSymbol: OperatorSymbol = { Kind = "Operator", OperatorKind = "OpMod" }
 local OperatorMultSymbol: OperatorSymbol = { Kind = "Operator", OperatorKind = "OpMult" }
 local OperatorAddSymbol: OperatorSymbol = { Kind = "Operator", OperatorKind = "OpAdd" }
@@ -98,6 +99,7 @@ local OperatorSubSymbol: OperatorSymbol = { Kind = "Operator", OperatorKind = "O
 local OperatorSymbols: { [string]: OperatorSymbol } = {
     ["OpPow"] = OperatorPowSymbol,
     ["OpDiv"] = OperatorDivSymbol,
+    ["OpFloorDiv"] = OperatorFloorDivSymbol,
     ["OpMod"] = OperatorModSymbol,
     ["OpMult"] = OperatorMultSymbol,
     ["OpAdd"] = OperatorAddSymbol,
@@ -360,13 +362,13 @@ local function ParseNumberDatatype(parser: Parser, token: Token): (Token?, (numb
     local num = tonumber(token.Value) :: number
 
     local token = parser:Advance()
-    if not token then return nil, nil end
-
-    local _token, datatype = ParseNumberOffset(parser, token, num)
-    if datatype ~= nil then return _token, datatype end
-
-    local _token, datatype = ParseNumberScale(parser, token, num)
-    if datatype ~= nil then return _token, datatype end
+    if token then
+        local _token, datatype = ParseNumberOffset(parser, token, num)
+        if datatype ~= nil then return _token, datatype end
+    
+        local _token, datatype = ParseNumberScale(parser, token, num)
+        if datatype ~= nil then return _token, datatype end
+    end
 
     return token, num
 end
@@ -413,12 +415,6 @@ local function ParseStringMultiDatatype(parser: Parser, token: Token): (Token?, 
     return token, str
 end
 
-local function ParseContentDatatype(parser: Parser, token: Token): (Token?, Content?)
-    if token.Kind ~= "RobloxContent" then return token, nil end
-
-    return parser:Advance(), Content.fromAssetId(tonumber(string.sub(token.Value, 11)) :: number)
-end
-
 local function ParseStringSingleDatatype(parser: Parser, token: Token): (Token?, string?)
     local tokenKind: TokenKind = token.Kind
 
@@ -447,7 +443,7 @@ local function ParsePredefinedColor(
     kind: TokenKind, colorsTable: { [string]: Color3 }
 ): (Token?, Color3?)
     if token.Kind ~= kind then return end
-    return parser:Advance(), colorsTable[token.Value]
+    return parser:Advance(), colorsTable[string.lower(token.Value)]
 end
 
 local function ParsePredefinedColorDatatype(parser: Parser, token: Token): (Token?, Color3?)
@@ -458,6 +454,22 @@ local function ParsePredefinedColorDatatype(parser: Parser, token: Token): (Toke
     if datatype ~= nil then return _token, datatype end
 
     local _token, datatype = ParsePredefinedColor(parser, token, "ColorBrick", ColorsBrick)
+    if datatype ~= nil then return _token, datatype end
+
+    return token, nil
+end
+
+local function ParseHexColorDatatype(parser: Parser, token: Token): (Token?, Color3?)
+    if token.Kind ~= "ColorHex" then return token, nil end
+
+    return parser:Advance(), Color3.fromHex(token.Value)
+end
+
+local function ParseColorDatatype(parser: Parser, token: Token): (Token?, Color3?)
+    local _token, datatype = ParsePredefinedColorDatatype(parser, token)
+    if datatype ~= nil then return _token, datatype end
+
+    local _token, datatype = ParseHexColorDatatype(parser, token)
     if datatype ~= nil then return _token, datatype end
 
     return token, nil
@@ -649,11 +661,18 @@ local TupleAnnotations: TupleAnnotationFunctions = {
     end,
 
     color3 = function(data)
-        local red = DefaultIfNotType(data[1], "number", 0) :: number
-        local green = DefaultIfNotType(data[2], "number", red) :: number
-        local blue = DefaultIfNotType(data[3], "number", green) :: number
+        local first = data[1]
 
-        return Color3.new(red, green, blue)
+        if typeof(first) == "BrickColor" then
+            return (first :: BrickColor).Color
+
+        else
+            local red = DefaultIfNotType(first, "number", 0) :: number
+            local green = DefaultIfNotType(data[2], "number", red) :: number
+            local blue = DefaultIfNotType(data[3], "number", green) :: number
+
+            return Color3.new(red, green, blue)
+        end
     end,
 
     rgb = function(data)
@@ -892,7 +911,7 @@ function ParseDatatype(
     local _token, datatype = ParseEnumDatatype(parser, token, key)
     if datatype ~= nil then return _token, datatype end
 
-    local _token, datatype = ParsePredefinedColorDatatype(parser, token)
+    local _token, datatype = ParseColorDatatype(parser, token)
     if datatype ~= nil then return _token, datatype end
 
     local _token, datatype = ParseBooleanDatatype(parser, token)
@@ -900,9 +919,6 @@ function ParseDatatype(
 
     local _token, datatype = ParseAttributeNameDatatype(parser, token)
     if datatype ~= nil then return _token, `${datatype}` end
-
-    local _token, datatype = ParseContentDatatype(parser, token)
-    if datatype ~= nil then return _token, datatype end
 
     return token, nil
 end
@@ -955,9 +971,9 @@ end
 
 type OperatorGroupItem = {
     Symbol: OperatorSymbol,
-    Fn: OperationFn
+    Fn: OperatorFn
 }
-type OperationFn = (left: number, right: number) -> number
+type OperatorFn = (left: number, right: number) -> number
 
 local ADD_SUB_OPERATORS = {
     {
@@ -984,6 +1000,10 @@ local ORDERED_OPERATORS: {{ OperatorGroupItem }} = {
             Fn = function(left: number, right: number) return left / right end
         },
         {
+            Symbol = OperatorFloorDivSymbol,
+            Fn = function(left: number, right: number) return left // right end
+        },
+        {
             Symbol = OperatorModSymbol,
             Fn = function(left: number, right: number) return left % right end
         },
@@ -996,11 +1016,23 @@ local ORDERED_OPERATORS: {{ OperatorGroupItem }} = {
     ADD_SUB_OPERATORS
 }
 
+type OperationFn = (left: any, right: any, operationFn: OperatorFn, operator: OperatorSymbol) -> Datatype
+
 type Operations = {
     [string]: {
-        [string]: (left: any, right: any, operationFn: OperationFn) -> Datatype
+        [string]: OperationFn
     }
 }
+
+local OperationNumberWithUDim: OperationFn = function(
+    left: number, right: UDim, operationFn, operator
+)
+    if operator.OperatorKind == "OpSub" then
+        return UDim.new(left - right.Scale, -right.Offset)
+    end
+
+    return UDim.new(operationFn(left, right.Scale),  right.Offset)
+end
 
 local DatatypeOperations: Operations = {
     ["number"] = {
@@ -1008,16 +1040,18 @@ local DatatypeOperations: Operations = {
             return operationFn(left, right)
         end,
 
-        ["UDim"] = function(left: number, right: UDim, operationFn): UDim
-            return UDim.new(operationFn(left, right.Scale),  right.Offset)
-        end,
+        ["UDim"] = OperationNumberWithUDim,
 
-        ["UDim2"] = function(left: number, right: UDim2, operationFn): UDim2
+        ["UDim2"] = function(
+            left: number, right: UDim2, operationFn, operator
+        ): UDim2
             local rightX, rightY = right.X, right.Y
 
+            local solvedRightX = OperationNumberWithUDim(left, rightX, operationFn, operator) :: UDim
+            local solvedRightY = OperationNumberWithUDim(left, rightY, operationFn, operator) :: UDim
+
             return UDim2.new(
-                operationFn(left, rightX.Scale), rightX.Offset, 
-                operationFn(left, rightY.Scale), rightY.Offset
+                solvedRightX, solvedRightY
             )
         end,
 
@@ -1238,8 +1272,10 @@ local DatatypeOperations: Operations = {
 }
 
 local function SolveDatatypeGroup(datatypes: { Datatype }): Datatype
+    print("solving")
+
     -- Merges Add and Sub operators with the datatype to the right if
-    -- the datatype to  the left isn't an operator.
+    -- the datatype to the left isn't an operator.
     local occurrences = FindOperatorsInDatatypes(datatypes, ADD_SUB_OPERATORS)
     local occurrenceIdxOffset = 0
     for _, occurrence in occurrences do
@@ -1267,14 +1303,15 @@ local function SolveDatatypeGroup(datatypes: { Datatype }): Datatype
                 continue
             end
 
-            local datatypeOperationFn = datatypeOperations[typeof(right)]
-            if not datatypeOperationFn then
+            local datatypeOperatorFn = datatypeOperations[typeof(right)]
+            if not datatypeOperatorFn then
                 datatypes[occurrenceIdx] = right
                 continue
             end
 
-            local operationFn = (occurrence[2] :: OperatorGroupItem).Fn
-            datatypes[occurrenceIdx] = datatypeOperationFn(0, right, operationFn)
+            local operationData = occurrence[2] :: OperatorGroupItem
+            local operationFn, operator = operationData.Fn, operationData.Symbol
+            datatypes[occurrenceIdx] = datatypeOperatorFn(0, right, operationFn, operator)
         end
     end
 
@@ -1309,14 +1346,15 @@ local function SolveDatatypeGroup(datatypes: { Datatype }): Datatype
                 continue
             end
 
-            local datatypeOperationFn = datatypeOperations[typeof(right)]
-            if not datatypeOperationFn then
+            local datatypeOperatorFn = datatypeOperations[typeof(right)]
+            if not datatypeOperatorFn then
                 datatypes[leftIdx] = left
                 continue
             end
 
-            local operationFn = (occurrence[2] :: OperatorGroupItem).Fn
-            datatypes[leftIdx] = datatypeOperationFn(left, right, operationFn)
+            local operationData = occurrence[2] :: OperatorGroupItem
+            local operationFn, operator = operationData.Fn, operationData.Symbol
+            datatypes[leftIdx] = datatypeOperatorFn(left, right, operationFn, operator)
         end
     end
 
@@ -1349,6 +1387,7 @@ function ParseDatatypeGroup(
 ): (Token?, Datatype?)
     local token, datatype = ParseDatatype(parser, token, key)
     if not datatype then
+        print("return a", datatypes, token)
         return token, ResolveDatatypeGroup(datatypes)
     end
 
@@ -1372,11 +1411,13 @@ function ParseDatatypeGroup(
     end
 
     if not token then
+        print("return b")
         return token, ResolveDatatypeGroup(datatypes)
     end
     local tokenKind: TokenKind = token.Kind
 
     if tokenKind == "ParensClose" or tokenKind == "ScopeClose" or tokenKind == "Comma" or tokenKind == "SemiColon" then
+        print("return c")
         return token, ResolveDatatypeGroup(datatypes)
     else
         if datatypeIsOperator then
