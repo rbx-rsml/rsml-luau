@@ -6,11 +6,26 @@ local Parser = require(script.Parent.Parser)
 
 type StyleParent = StyleSheet | StyleRule
 
-local function ResolvePath(path: string, inst: Instance): Instance
+local function ResolvePath(path: string, inst: Instance): Instance?
+    if string.match(path, "%.rsml$") then
+        path = string.sub(path, 1, #path - 5)
+    end
+
     local sections = string.split(path, "/")
     
-    for idx = if sections[1] == "." then 2 else 1, #sections do
-        inst = inst:WaitForChild(sections[idx])
+    for _, section in sections do
+        if section == ".." then
+            local parentInst = inst.Parent
+            if parentInst then inst = parentInst end
+
+            if not parentInst then
+                warn(`[RSML Error]: Instance could not be resolved for the path: \`{path}\``)
+                return nil
+            end
+
+        elseif section ~= "." then
+            inst = inst:WaitForChild(section)
+        end
     end
 
     return inst
@@ -125,16 +140,19 @@ local function ConvertRsml(rootTreeNode: Parser.TreeNode, derivesTble: { StyleSh
                 ApplyDerive(defaultStyles, styleSheet)
 
             else
-                local sheetToDerive = ResolvePath(sheetToDerivePath, styleSheetParent)
-                if sheetToDerive and sheetToDerive.ClassName == "StyleSheet" then
-                    -- Ensures the derived StyleSheet doesn't exist in the derives table.
-                    if derivesTble then
-                        local foundInDerivesTble = table.find(derivesTble, sheetToDerive :: StyleSheet)
-                        if foundInDerivesTble then table.remove(derivesTble, foundInDerivesTble) end
-                    end
+                -- Spawns thread as `ResolvePath` may yield.
+                task.spawn(function()
+                    local sheetToDerive = ResolvePath(sheetToDerivePath, styleSheetParent)
+                    if sheetToDerive and sheetToDerive.ClassName == "StyleSheet" then
+                        -- Ensures the derived StyleSheet doesn't exist in the derives table.
+                        if derivesTble then
+                            local foundInDerivesTble = table.find(derivesTble, sheetToDerive :: StyleSheet)
+                            if foundInDerivesTble then table.remove(derivesTble, foundInDerivesTble) end
+                        end
 
-                    ApplyDerive(sheetToDerive :: StyleSheet, styleSheet)
-                end
+                        ApplyDerive(sheetToDerive :: StyleSheet, styleSheet)
+                    end
+                end)
             end
         end
     end

@@ -17,6 +17,10 @@ local ColorsBrick = require(Colors.Brick)
 local TupleAnnotations = script.TupleAnnotations
 local ColorSeqTupleAnnotation = require(TupleAnnotations.ColorSeq)
 local NumSeqTupleAnnotation = require(TupleAnnotations.NumSeq)
+local LerpAnnotation = require(TupleAnnotations.Lerp)
+local CeilAnnotation = require(TupleAnnotations.Ceil)
+local FloorAnnotation = require(TupleAnnotations.Floor)
+local RoundAnnotation = require(TupleAnnotations.Round)
 
 local Parser = {}
 Parser.__index = Parser
@@ -106,13 +110,20 @@ local OperatorSymbols: { [string]: OperatorSymbol } = {
     ["OpSub"] = OperatorSubSymbol
 }
 
-local EMPTY = { Kind = "Empty" }
+type IncompleteEnumShorthand = { Kind: "IncompleteEnumShorthand", Value: string }
 
-export type Datatype = string | boolean | EnumItem | Color3 | number | UDim | UDim2 | OperatorSymbol | Vector3 | Rect | Font | Vector2 | ColorSequenceKeypoint | { Kind: "Empty" } | TupleData | Content | Vector2int16 | Vector3int16
+local function NewIncompleteEnumShorthand(value: string): IncompleteEnumShorthand
+    return { Kind = "IncompleteEnumShorthand", Value = value }
+end
+
+local DATATYPE_NONE = require(script.DatatypeNone)
+type DatatypeNone = DATATYPE_NONE.DatatypeNone
+
+export type Datatype = string | boolean | EnumItem | Color3 | number | UDim | UDim2 | OperatorSymbol | Vector3 | Rect | Font | Vector2 | DatatypeNone | TupleData | Content | Vector2int16 | Vector3int16 | IncompleteEnumShorthand | ColorSequence | NumberSequence
 
 export type TreeNode = {
-    Attributes: { [string]: Datatype },
-    Properties: { [string]: Datatype },
+    Attributes: { [string]: FinalizedDatatype },
+    Properties: { [string]: FinalizedDatatype },
     Name: string?,
     Rules: { TreeNode },
     Derives: { [string]: true },
@@ -184,7 +195,7 @@ end
 function Selector.Append(self: Selector, token: Token)
     local tokenKind: TokenKind, currentTokenKind: TokenKind = token.Kind, self.CurrentToken.Kind
 
-    local shouldAddSpace = tokenKind ~= "Comma" and (
+    local shouldAddSpace = tokenKind ~= "Comma" and tokenKind ~= "StateOrEnumIdentifier" and (
         currentTokenKind == "ScopeToDescendants" or currentTokenKind == "ScopeToChildren" or 
         currentTokenKind == "Text" or currentTokenKind == "Comma"
     )
@@ -316,8 +327,7 @@ local function ParseEnumKeyword(parser: Parser, token: Token): (Token?, (EnumIte
     return ParseFullEnum(parser, token, tokenHistory)
 end
 
-local function ParseEnumShorthand(parser: Parser, token: Token, key: string?): (Token?, (EnumItem | true)?)
-    if not key then return token, nil end
+local function ParseEnumShorthand(parser: Parser, token: Token, key: string?): (Token?, (EnumItem | true | IncompleteEnumShorthand)?)
     if token.Kind ~= "StateOrEnumIdentifier" then return token, nil end
 
     local token = parser:Advance()
@@ -325,6 +335,8 @@ local function ParseEnumShorthand(parser: Parser, token: Token, key: string?): (
 
     if token.Kind ~= "Text" then return token, nil end
     local enumItem = token.Value
+
+    if not key then return parser:Advance(), NewIncompleteEnumShorthand(enumItem) end
 
     local ok, enum = pcall(function() return Enum[key] end)
     if not ok then return token, true end
@@ -475,11 +487,21 @@ local function ParseColorDatatype(parser: Parser, token: Token): (Token?, Color3
     return token, nil
 end
 
-local function ParseBooleanDatatype(parser: Parser, token: Token): (Token?, boolean?)
-    local tokenKind = token.Kind
-    if tokenKind ~= "BoolTrue" and tokenKind ~= "BoolFalse" then return token, nil end
+local function ParseNilDatatype(parser: Parser, token: Token): (Token?, DatatypeNone?)
+    local tokenKind: TokenKind = token.Kind
+    if tokenKind ~= "Nil" then return token, nil end
 
-    return parser:Advance(), if token.Value == "true" then true else false
+    return parser:Advance(), DATATYPE_NONE
+end
+
+local function ParseBooleanDatatype(parser: Parser, token: Token): (Token?, boolean?)
+    local tokenKind: TokenKind = token.Kind
+
+    if tokenKind == "BoolTrue" then return parser:Advance(), true end
+    if tokenKind == "BoolFalse" then return parser:Advance(), false end
+
+
+    return token, nil
 end
 
 local function ParseAttributeNameDatatype(parser: Parser, token: Token): (Token?, string?)
@@ -708,6 +730,10 @@ local TupleAnnotations: TupleAnnotationFunctions = {
         end
 
         local fontWeight = data[2]
+        if type(fontWeight) == "table" and (fontWeight :: any).Kind == "IncompleteEnumShorthand" then
+            fontWeight = (fontWeight :: IncompleteEnumShorthand).Value
+        end
+
         local fontWeight =
             if fontWeight == "Regular" then Enum.FontWeight.Regular
             elseif fontWeight == "Thin" then Enum.FontWeight.Thin
@@ -721,6 +747,10 @@ local TupleAnnotations: TupleAnnotationFunctions = {
             else Enum.FontWeight.Regular
 
         local fontStyle = data[3]
+        if type(fontStyle) == "table" and (fontStyle :: any).Kind == "IncompleteEnumShorthand" then
+            fontStyle = (fontStyle :: IncompleteEnumShorthand).Value
+        end
+
         local fontStyle =
             if fontStyle == "Italic" then Enum.FontStyle.Italic
             else Enum.FontStyle.Normal
@@ -744,7 +774,12 @@ local TupleAnnotations: TupleAnnotationFunctions = {
         local max = DefaultIfNotType(data[2], "number", min) :: number
 
         return NumberRange.new(min, max)
-    end
+    end,
+
+    lerp = LerpAnnotation,
+    floor = FloorAnnotation,
+    ceil = CeilAnnotation,
+    round = RoundAnnotation
 }
 
 local function CoerceTupleToDatatype(tuple: Tuple): Datatype?
@@ -758,7 +793,7 @@ local function CoerceTupleToDatatype(tuple: Tuple): Datatype?
     local tupleDataLength = #tupleData
 
     return
-        if tupleDataLength == 0 then EMPTY
+        if tupleDataLength == 0 then DATATYPE_NONE
         -- If the tuple only has one item then it can be simplified to just that item.
         elseif tupleDataLength == 1 then tupleData[1] 
         else tupleData
@@ -824,7 +859,7 @@ function ParseTupleDatatype(
     currTuple: Tuple, rootTuple: Tuple
 ): Token?
     local token, datatype = ParseDatatypeGroup(parser, token, nil)
-    if not datatype then return end
+    if datatype == nil then return end
     
     table.insert(currTuple.Data, datatype)
 
@@ -915,6 +950,9 @@ function ParseDatatype(
     if datatype ~= nil then return _token, datatype end
 
     local _token, datatype = ParseBooleanDatatype(parser, token)
+    if datatype ~= nil then return _token, datatype end
+
+    local _token, datatype = ParseNilDatatype(parser, token)
     if datatype ~= nil then return _token, datatype end
 
     local _token, datatype = ParseAttributeNameDatatype(parser, token)
@@ -1272,8 +1310,6 @@ local DatatypeOperations: Operations = {
 }
 
 local function SolveDatatypeGroup(datatypes: { Datatype }): Datatype
-    print("solving")
-
     -- Merges Add and Sub operators with the datatype to the right if
     -- the datatype to the left isn't an operator.
     local occurrences = FindOperatorsInDatatypes(datatypes, ADD_SUB_OPERATORS)
@@ -1336,7 +1372,7 @@ local function SolveDatatypeGroup(datatypes: { Datatype }): Datatype
             else
                 leftIdx = occurrenceIdx - 1
                 left = table.remove(datatypes, leftIdx) :: Datatype
-                if left == EMPTY then left = 0 end
+                if left == DATATYPE_NONE then left = 0 end
                 occurrenceIdxOffset += 1
             end
 
@@ -1386,8 +1422,7 @@ function ParseDatatypeGroup(
     datatypes: { Datatype }?, pendingOperator: OperatorSymbol?
 ): (Token?, Datatype?)
     local token, datatype = ParseDatatype(parser, token, key)
-    if not datatype then
-        print("return a", datatypes, token)
+    if datatype == nil then
         return token, ResolveDatatypeGroup(datatypes)
     end
 
@@ -1411,13 +1446,11 @@ function ParseDatatypeGroup(
     end
 
     if not token then
-        print("return b")
         return token, ResolveDatatypeGroup(datatypes)
     end
     local tokenKind: TokenKind = token.Kind
 
     if tokenKind == "ParensClose" or tokenKind == "ScopeClose" or tokenKind == "Comma" or tokenKind == "SemiColon" then
-        print("return c")
         return token, ResolveDatatypeGroup(datatypes)
     else
         if datatypeIsOperator then
@@ -1451,6 +1484,33 @@ local function ParseDelimiters(parser: Parser, token: Token): Token?
     return ParseDelimiters(parser, token)
 end
 
+export type FinalizedDatatype = string | boolean | EnumItem | Color3 | number | UDim | UDim2 | Vector3 | Rect | Font | Vector2 | Content | Vector2int16 | Vector3int16 | ColorSequence | NumberSequence
+
+local function FinalizeDatatype(datatype: Datatype, key: string?): FinalizedDatatype?
+    if type(datatype) == "table" then
+        local kind = (datatype :: any).Kind
+
+        if kind == "Operator" or kind == "None" then
+            return nil
+
+        elseif kind == "IncompleteEnumShorthand" then
+            local ok, enum = pcall(function() return Enum[key] end)
+            if not ok then return nil end
+
+            local ok, enum = pcall(function() return enum[(datatype :: IncompleteEnumShorthand).Value] end)
+            if not ok then return nil end
+
+            return enum
+
+        else
+            return FinalizeDatatype((datatype :: TupleData)[1], key)
+        end
+
+    else
+        return datatype
+    end
+end
+
 local function ParseAttribute(parser: Parser, token: Token, currTreeNode: TreeNode): Token?
     if token.Kind ~= "AttributeIdentifier" then return token end
 
@@ -1470,7 +1530,8 @@ local function ParseAttribute(parser: Parser, token: Token, currTreeNode: TreeNo
 
     local token, datatype = ParseDatatypeGroup(parser, token, attributeName)
     if datatype ~= nil then
-        currTreeNode.Attributes[attributeName] = if type(datatype) == "table" then datatype[1] else datatype
+        local finalizedDatatype = FinalizeDatatype(datatype, attributeName)
+        if finalizedDatatype then currTreeNode.Attributes[attributeName] = finalizedDatatype end
     end
 
     if not token then return nil end
@@ -1495,7 +1556,8 @@ local function ParseProperty(parser: Parser, token: Token, currTreeNode: TreeNod
 
     local token, datatype = ParseDatatypeGroup(parser, token, propertyName)
     if datatype ~= nil then
-        currTreeNode.Properties[propertyName] = if type(datatype) == "table" then datatype[1] else datatype
+        local finalizedDatatype = FinalizeDatatype(datatype, propertyName)
+        if finalizedDatatype then currTreeNode.Properties[propertyName] = finalizedDatatype end
     end
 
     if not token then return nil end
@@ -1525,6 +1587,10 @@ local function ParseNameDeclaration(parser: Parser, token: Token, currTreeNode: 
 
     local token, datatype = ParseDatatypeGroup(parser, token)
     if type(datatype) == "string" then
+        if string.match(datatype, "%.rsml$") then
+            datatype = string.sub(datatype, 1, #datatype - 5)
+        end
+
         currTreeNode.Name = datatype
     end
 

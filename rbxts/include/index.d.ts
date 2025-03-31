@@ -41,11 +41,17 @@ export type OperatorSymbol = { Kind: "Operator", OperatorKind: OperatorKind }
 
 export type TupleData = (Datatype | TupleData[])[]
 
-export type Datatype = string | boolean | EnumItem | Color3 | number | UDim | UDim2 | OperatorSymbol | Vector3 | Rect | Font | Vector2 | ColorSequenceKeypoint | { Kind: "Empty" } | TupleData
+export type DatatypeNone = { Kind: "None" }
+
+export type IncompleteEnumShorthand = { Kind: "IncompleteEnumShorthand", Value: string }
+
+export type Datatype = string | boolean | EnumItem | Color3 | number | UDim | UDim2 | OperatorSymbol | Vector3 | Rect | Font | Vector2 | DatatypeNone | TupleData | Content | Vector2int16 | Vector3int16 | IncompleteEnumShorthand | ColorSequence | NumberSequence
+
+export type FinalizedDatatype = string | boolean | EnumItem | Color3 | number | UDim | UDim2 | Vector3 | Rect | Font | Vector2 | Content | Vector2int16 | Vector3int16 | ColorSequence | NumberSequence
 
 export type TreeNode = {
-    Attributes: { [Key: string]: Datatype },
-    Properties: { [Key: string]: Datatype },
+    Attributes: { [Key: string]: FinalizedDatatype },
+    Properties: { [Key: string]: FinalizedDatatype },
     Name?: string,
     Rules: TreeNode[],
     Derives: { [Key: string]: true },

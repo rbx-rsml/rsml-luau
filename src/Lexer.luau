@@ -26,6 +26,7 @@ export type TokenKind =
     "PriorityDeclaration" | "DeriveDeclaration" | "NameDeclaration" |
     "OpAdd" | "OpSub" | "OpMult" | "OpDiv" | "OpFloorDiv" | "OpPow" | "OpMod" |
     "BoolTrue" | "BoolFalse" |
+    "Nil" |
     "EnumKeyword" |
     "ColorTailwind" | "ColorBrick" | "ColorCss" | "ColorHex" | 
     "Number" | "Offset" | "ScaleOrOpMod" |
@@ -163,6 +164,11 @@ local TokenDefinitions: { TokenDefinition } = {
     {
         Kind = "BoolFalse",
         Pattern = "false"
+    },
+
+    {
+        Kind = "Nil",
+        Pattern = "nil"
     },
 
     {
