@@ -327,6 +327,12 @@ local function ParseEnumKeyword(parser: Parser, token: Token): (Token?, (EnumIte
     return ParseFullEnum(parser, token, tokenHistory)
 end
 
+local SHORTHAND_HARDCODES = {
+    FlexMode = "UIFlexMode",
+    HorizontalFlex = "UIFlexAlignment",
+    VerticalFlex = "UIFlexAlignment"
+}
+
 local function ParseEnumShorthand(parser: Parser, token: Token, key: string?): (Token?, (EnumItem | true | IncompleteEnumShorthand)?)
     if token.Kind ~= "StateOrEnumIdentifier" then return token, nil end
 
@@ -338,7 +344,8 @@ local function ParseEnumShorthand(parser: Parser, token: Token, key: string?): (
 
     if not key then return parser:Advance(), NewIncompleteEnumShorthand(enumItem) end
 
-    local ok, enum = pcall(function() return Enum[key] end)
+    local enumName = SHORTHAND_HARDCODES[key] or key
+    local ok, enum = pcall(function() return Enum[enumName] end)
     if not ok then return token, true end
 
     local ok, enum = pcall(function() return enum[enumItem] end)
@@ -585,9 +592,9 @@ local TupleAnnotations: TupleAnnotationFunctions = {
 
         else
             local xScale = DefaultIfNotType(data[1], "number", 0) :: number
-            local xOffset = DefaultIfNotType(data[2], "number", 0) :: number
-            local yScale = DefaultIfNotType(data[3], "number", 0) :: number
-            local yOffset = DefaultIfNotType(data[4], "number", 0) :: number
+            local xOffset = DefaultIfNotType(data[2], "number", xScale * 100) :: number
+            local yScale = DefaultIfNotType(data[3], "number", xScale) :: number
+            local yOffset = DefaultIfNotType(data[4], "number", yScale * 100) :: number
 
             return UDim2.new(xScale, xOffset, yScale, yOffset)
         end
@@ -729,30 +736,65 @@ local TupleAnnotations: TupleAnnotationFunctions = {
             fontFamily = "rbxasset://fonts/families/SourceSansPro.json"
         end
 
-        local fontWeight = data[2]
-        if type(fontWeight) == "table" and (fontWeight :: any).Kind == "IncompleteEnumShorthand" then
-            fontWeight = (fontWeight :: IncompleteEnumShorthand).Value
+        local rawFontWeight = data[2]
+        if type(rawFontWeight) == "table" and (rawFontWeight :: any).Kind == "IncompleteEnumShorthand" then
+            rawFontWeight = (rawFontWeight :: IncompleteEnumShorthand).Value
         end
+        local rawFontWeightTypeOf = typeof(rawFontWeight)
 
         local fontWeight =
-            if fontWeight == "Regular" then Enum.FontWeight.Regular
-            elseif fontWeight == "Thin" then Enum.FontWeight.Thin
-            elseif fontWeight == "ExtraLight" then Enum.FontWeight.ExtraLight
-            elseif fontWeight == "Light" then Enum.FontWeight.Light
-            elseif fontWeight == "Medium" then Enum.FontWeight.Medium
-            elseif fontWeight == "SemiBold" then Enum.FontWeight.SemiBold
-            elseif fontWeight == "Bold" then Enum.FontWeight.Bold
-            elseif fontWeight == "ExtraBold" then Enum.FontWeight.ExtraBold
-            elseif fontWeight == "Heavy" then Enum.FontWeight.Heavy
+            if rawFontWeightTypeOf == "string" then
+                if rawFontWeight == "Thin" then Enum.FontWeight.Thin
+                elseif rawFontWeight == "ExtraLight" then Enum.FontWeight.ExtraLight
+                elseif rawFontWeight == "Light" then Enum.FontWeight.Light
+                elseif rawFontWeight == "Regular" then Enum.FontWeight.Regular
+                elseif rawFontWeight == "Medium" then Enum.FontWeight.Medium
+                elseif rawFontWeight == "SemiBold" then Enum.FontWeight.SemiBold
+                elseif rawFontWeight == "Bold" then Enum.FontWeight.Bold
+                elseif rawFontWeight == "ExtraBold" then Enum.FontWeight.ExtraBold
+                elseif rawFontWeight == "Heavy" then Enum.FontWeight.Heavy
+                elseif rawFontWeight == "Enum.FontWeight.Thin" then Enum.FontWeight.Thin
+                elseif rawFontWeight == "Enum.FontWeight.ExtraLight" then Enum.FontWeight.ExtraLight
+                elseif rawFontWeight == "Enum.FontWeight.Light" then Enum.FontWeight.Light
+                elseif rawFontWeight == "Enum.FontWeight.Regular" then Enum.FontWeight.Regular
+                elseif rawFontWeight == "Enum.FontWeight.Medium" then Enum.FontWeight.Medium
+                elseif rawFontWeight == "Enum.FontWeight.SemiBold" then Enum.FontWeight.SemiBold
+                elseif rawFontWeight == "Enum.FontWeight.Bold" then Enum.FontWeight.Bold
+                elseif rawFontWeight == "Enum.FontWeight.ExtraBold" then Enum.FontWeight.ExtraBold
+                elseif rawFontWeight == "Enum.FontWeight.Heavy" then Enum.FontWeight.Heavy
+                else Enum.FontWeight.Regular
+            elseif rawFontWeightTypeOf == "EnumItem" and (rawFontWeight :: EnumItem).EnumType == Enum.FontWeight then
+                rawFontWeight :: Enum.FontWeight
+            elseif rawFontWeightTypeOf == "number" then
+                if rawFontWeight == 100 then Enum.FontWeight.Thin
+                elseif rawFontWeight == 200 then Enum.FontWeight.ExtraLight
+                elseif rawFontWeight == 300 then Enum.FontWeight.Light
+                elseif rawFontWeight == 400 then Enum.FontWeight.Regular
+                elseif rawFontWeight == 500 then Enum.FontWeight.Medium
+                elseif rawFontWeight == 600 then Enum.FontWeight.SemiBold
+                elseif rawFontWeight == 700 then Enum.FontWeight.Bold
+                elseif rawFontWeight == 800 then Enum.FontWeight.ExtraBold
+                elseif rawFontWeight == 900 then Enum.FontWeight.Heavy
+                else Enum.FontWeight.Regular
             else Enum.FontWeight.Regular
 
-        local fontStyle = data[3]
-        if type(fontStyle) == "table" and (fontStyle :: any).Kind == "IncompleteEnumShorthand" then
-            fontStyle = (fontStyle :: IncompleteEnumShorthand).Value
+        local rawFontStyle = data[3]
+        if type(rawFontStyle) == "table" and (rawFontStyle :: any).Kind == "IncompleteEnumShorthand" then
+            rawFontStyle = (rawFontStyle :: IncompleteEnumShorthand).Value
         end
+        local rawFontStyleTypeOf = typeof(rawFontStyle)
 
         local fontStyle =
-            if fontStyle == "Italic" then Enum.FontStyle.Italic
+            if rawFontStyleTypeOf == "string" then
+                if rawFontStyle == "Normal" then Enum.FontStyle.Normal
+                elseif rawFontStyle == "Italic" then Enum.FontStyle.Italic
+                elseif rawFontStyle == "Enum.FontStyle.Italic" then Enum.FontStyle.Italic
+                else Enum.FontStyle.Normal
+            elseif rawFontStyleTypeOf == "EnumItem" and (rawFontStyle :: EnumItem).EnumType == Enum.FontStyle then
+                rawFontStyle :: Enum.FontStyle
+            elseif rawFontStyleTypeOf == "number" then
+                if rawFontStyle == 1 then Enum.FontStyle.Italic
+                else Enum.FontStyle.Normal
             else Enum.FontStyle.Normal
         
         return Font.new(fontFamily :: string, fontWeight, fontStyle)
