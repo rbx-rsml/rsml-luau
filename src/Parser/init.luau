@@ -631,10 +631,10 @@ local TupleAnnotations: TupleAnnotationFunctions = {
     end,
 
     cframe = function(data)
-        local data1 = data[1]
+        local first = data[1]
 
-        if type(data1) == "number" then
-            local posXComponent = data1
+        if type(first) == "number" then
+            local posXComponent = first
             local posYComponent = DefaultIfNotType(data[2], "number", posXComponent)
             local posZComponent = DefaultIfNotType(data[3], "number", posYComponent)
 
@@ -673,19 +673,20 @@ local TupleAnnotations: TupleAnnotationFunctions = {
     end,
 
     rect = function(data)
-        if #data == 2 then
+        local first = data[1]
+
+        if type(first) == "number" then
+            local minY = DefaultIfNotType(data[2], "number", first) :: number
+            local maxX = DefaultIfNotType(data[3], "number", first) :: number
+            local maxY = DefaultIfNotType(data[4], "number", minY) :: number
+
+            return Rect.new(first, minY, maxX, maxY)
+
+        else
             local min = DefaultIfNotVector2Any(data[1], Vector2.zero)
             local max = DefaultIfNotVector2Any(data[2], min)
 
             return Rect.new(min, max)
-
-        else
-            local minX = DefaultIfNotType(data[1], "number", 0) :: number
-            local minY = DefaultIfNotType(data[2], "number", minX) :: number
-            local maxX = DefaultIfNotType(data[3], "number", minX) :: number
-            local maxY = DefaultIfNotType(data[4], "number", maxX) :: number
-
-            return Rect.new(minX, minY, maxX, maxY)
         end
     end,
 
